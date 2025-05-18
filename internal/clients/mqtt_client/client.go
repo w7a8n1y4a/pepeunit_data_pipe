@@ -25,7 +25,7 @@ type ClientOption func(*MQTTClient)
 
 func WithReconnectInterval(interval time.Duration) ClientOption {
 	return func(c *MQTTClient) {
-		// This can be expanded if we add reconnect interval to the client struct
+		// Can be expanded if needed
 	}
 }
 
@@ -33,13 +33,14 @@ type MQTTClient struct {
 	cfg            *config.Config
 	cm             *autopaho.ConnectionManager
 	router         *paho.StandardRouter
-	subscriptions  map[string]paho.SubscribeOptions // Current subscriptions
+	subscriptions  map[string]paho.SubscribeOptions
 	messageHandler func(topic string, payload []byte)
 	mu             sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	connected      bool
+	connectOnce    sync.Once
 }
 
 func New(cfg *config.Config, messageHandler func(topic string, payload []byte)) (*MQTTClient, error) {
@@ -63,106 +64,141 @@ func New(cfg *config.Config, messageHandler func(topic string, payload []byte)) 
 	}, nil
 }
 
-// Connect establishes the MQTT connection
 func (c *MQTTClient) Connect() error {
-    token, err := generateToken(c.cfg)
-    if err != nil {
-        return fmt.Errorf("failed to generate token: %w", err)
-    }
+	var connectErr error
+	c.connectOnce.Do(func() {
+		token, err := generateToken(c.cfg)
+		if err != nil {
+			connectErr = fmt.Errorf("failed to generate token: %w", err)
+			return
+		}
+		
+		mqttURL := fmt.Sprintf(
+			"mqtt://%s:%d",
+			c.cfg.MQTT_HOST,
+			c.cfg.MQTT_PORT,
+		)
+
+		serverURL, err := url.Parse(mqttURL)
+		if err != nil {
+			connectErr = fmt.Errorf("failed to parse MQTT URL: %w", err)
+			return
+		}
+
+		cliCfg := autopaho.ClientConfig{
+			ServerUrls: []*url.URL{serverURL},
+			KeepAlive:  uint16(c.cfg.MQTT_KEEPALIVE),
+			CleanStartOnInitialConnection: false,
+			SessionExpiryInterval: 86400,
+			OnConnectionUp: func(cm *autopaho.ConnectionManager, connAck *paho.Connack) {
+				c.mu.Lock()
+				wasConnected := c.connected
+				c.connected = true
+				c.mu.Unlock()
+				
+				if !wasConnected {
+					log.Println("MQTT connection established")
+					if err := c.resubscribe(); err != nil {
+						log.Printf("Failed to resubscribe: %v", err)
+					}
+				}
+			},
+			OnConnectError: func(err error) {
+				log.Printf("MQTT connection error: %v", err)
+			},
+			ClientConfig: paho.ClientConfig{
+				ClientID: c.cfg.BACKEND_DOMAIN,
+				Router:   c.router,
+				OnClientError: func(err error) {
+					log.Printf("MQTT client error: %v", err)
+					c.mu.Lock()
+					c.connected = false
+					c.mu.Unlock()
+				},
+				OnServerDisconnect: func(disconnect *paho.Disconnect) {
+					c.mu.Lock()
+					c.connected = false
+					c.mu.Unlock()
+					log.Printf("MQTT server disconnected: %v", disconnect)
+				},
+			},
+			ConnectUsername: token,
+		}
+
+		c.router.RegisterHandler("*", func(p *paho.Publish) {
+			c.messageHandler(p.Topic, p.Payload)
+		})
+
+		cm, err := autopaho.NewConnection(c.ctx, cliCfg)
+		if err != nil {
+			connectErr = fmt.Errorf("failed to create connection manager: %w", err)
+			return
+		}
+
+		c.cm = cm
+
+		if err := c.cm.AwaitConnection(c.ctx); err != nil {
+			connectErr = fmt.Errorf("failed to wait for connection: %w", err)
+			return
+		}
+
+		c.wg.Add(1)
+		go c.connectionMonitor()
+	})
+
+	return connectErr
+}
+
+func (c *MQTTClient) connectionMonitor() {
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.mu.RLock()
+			connected := c.connected
+			c.mu.RUnlock()
+
+			if !connected {
+				log.Println("MQTT connection lost, attempting to reconnect...")
+			}
+		}
+	}
+}
+
+func (c *MQTTClient) Subscribe(topic string, qos byte) error {
+	log.Printf("Attempting to subscribe to %s", topic)
 	
-    mqttURL := fmt.Sprintf(
-        "mqtt://%s:%d",
-        c.cfg.MQTT_HOST,
-        c.cfg.MQTT_PORT,
-    )
+	// Get lock with timeout to prevent deadlock
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
 
-    serverURL, err := url.Parse(mqttURL)
-    if err != nil {
-        return fmt.Errorf("failed to parse MQTT URL: %w", err)
-    }
+	// Try to acquire lock with timeout
+	lockAcquired := make(chan struct{})
+	go func() {
+		c.mu.Lock()
+		close(lockAcquired)
+	}()
 
-    cliCfg := autopaho.ClientConfig{
-        ServerUrls: []*url.URL{serverURL},
-        KeepAlive:  30,
-        CleanStartOnInitialConnection: false,
-        SessionExpiryInterval: 60 * 60 * 24, // 1 day
-        OnConnectionUp: func(cm *autopaho.ConnectionManager, connAck *paho.Connack) {
-            c.mu.Lock()
-            c.connected = true
-            c.mu.Unlock()
-            log.Println("MQTT connection established")
-
-            // Resubscribe to all topics on reconnection
-            if err := c.resubscribe(); err != nil {
-                log.Printf("Failed to resubscribe: %v", err)
-            }
-        },
-        OnConnectError: func(err error) {
-            log.Printf("MQTT connection error: %v", err)
-        },
-        ClientConfig: paho.ClientConfig{
-            ClientID: c.cfg.BACKEND_DOMAIN,
-            Router:   c.router,
-        },
-		ConnectUsername: token,
-        ConnectPassword: nil,
+	select {
+	case <-lockAcquired:
+		defer c.mu.Unlock()
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for lock while subscribing to %s", topic)
 	}
 
-	// Setup router to handle incoming messages
-c.router.RegisterHandler("*", func(p *paho.Publish) {
-    c.messageHandler(p.Topic, p.Payload)
-})
-
-    // Start connection manager
-    cm, err := autopaho.NewConnection(c.ctx, cliCfg)
-    if err != nil {
-        return fmt.Errorf("failed to create connection manager: %w", err)
-    }
-
-    c.cm = cm
-
-    // Start reconnection handler
-    c.wg.Add(1)
-    go c.reconnectionHandler()
-
-    return nil
-}
-
-func (c *MQTTClient) reconnectionHandler() {
-    defer c.wg.Done()
-
-    ticker := time.NewTicker(5 * time.Second)
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-c.ctx.Done():
-            return
-        case <-ticker.C:
-            c.mu.RLock()
-            connected := c.connected
-            c.mu.RUnlock()
-
-            if !connected {
-                log.Println("MQTT connection lost, waiting for automatic reconnection...")
-            }
-        }
-    }
-}
-
-// Subscribe adds a new topic subscription
-func (c *MQTTClient) Subscribe(topic string, qos byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Add to subscriptions map
 	c.subscriptions[topic] = paho.SubscribeOptions{
 		Topic: topic,
 		QoS:   qos,
 	}
 
-	// If connected, subscribe immediately
-	if c.connected {
+	if c.connected && c.cm != nil {
+		log.Printf("Sending subscribe for %s", topic)
 		_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
 			Subscriptions: []paho.SubscribeOptions{
 				{Topic: topic, QoS: qos},
@@ -172,17 +208,18 @@ func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 			delete(c.subscriptions, topic)
 			return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
 		}
+		log.Printf("Successfully subscribed to %s", topic)
 	}
 
 	return nil
 }
 
-// resubscribe renews all current subscriptions
 func (c *MQTTClient) resubscribe() error {
+	// Use read lock since we're only reading subscriptions
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if len(c.subscriptions) == 0 {
+	if len(c.subscriptions) == 0 || c.cm == nil {
 		return nil
 	}
 
@@ -201,7 +238,6 @@ func (c *MQTTClient) resubscribe() error {
 	return nil
 }
 
-// Disconnect closes the MQTT connection
 func (c *MQTTClient) Disconnect() {
 	c.cancel()
 	if c.cm != nil {
@@ -210,7 +246,6 @@ func (c *MQTTClient) Disconnect() {
 	c.wg.Wait()
 }
 
-// generateToken creates a JWT token for MQTT authentication
 func generateToken(cfg *config.Config) (string, error) {
 	claims := jwt.MapClaims{
 		"domain": cfg.BACKEND_DOMAIN,
@@ -223,6 +258,6 @@ func generateToken(cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %v", err)
 	}
-
+	
 	return signedToken, nil
 }
