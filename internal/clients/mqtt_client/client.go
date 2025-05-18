@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"sync"
 	"time"
-	"net/url"
 
 	"data_pipe/internal/config"
-	
+
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/golang-jwt/jwt/v5"
@@ -72,7 +72,7 @@ func (c *MQTTClient) Connect() error {
 			connectErr = fmt.Errorf("failed to generate token: %w", err)
 			return
 		}
-		
+
 		mqttURL := fmt.Sprintf(
 			"mqtt://%s:%d",
 			c.cfg.MQTT_HOST,
@@ -86,16 +86,16 @@ func (c *MQTTClient) Connect() error {
 		}
 
 		cliCfg := autopaho.ClientConfig{
-			ServerUrls: []*url.URL{serverURL},
-			KeepAlive:  uint16(c.cfg.MQTT_KEEPALIVE),
+			ServerUrls:                    []*url.URL{serverURL},
+			KeepAlive:                     uint16(c.cfg.MQTT_KEEPALIVE),
 			CleanStartOnInitialConnection: false,
-			SessionExpiryInterval: 86400,
+			SessionExpiryInterval:         86400,
 			OnConnectionUp: func(cm *autopaho.ConnectionManager, connAck *paho.Connack) {
 				c.mu.Lock()
 				wasConnected := c.connected
 				c.connected = true
 				c.mu.Unlock()
-				
+
 				if !wasConnected {
 					log.Println("MQTT connection established")
 					if err := c.resubscribe(); err != nil {
@@ -173,12 +173,10 @@ func (c *MQTTClient) connectionMonitor() {
 
 func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 	log.Printf("Attempting to subscribe to %s", topic)
-	
-	// Get lock with timeout to prevent deadlock
+
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
 
-	// Try to acquire lock with timeout
 	lockAcquired := make(chan struct{})
 	go func() {
 		c.mu.Lock()
@@ -215,7 +213,6 @@ func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 }
 
 func (c *MQTTClient) resubscribe() error {
-	// Use read lock since we're only reading subscriptions
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -258,6 +255,6 @@ func generateToken(cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %v", err)
 	}
-	
+
 	return signedToken, nil
 }

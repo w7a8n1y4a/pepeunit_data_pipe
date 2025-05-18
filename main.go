@@ -1,11 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"fmt"
 
 	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
@@ -25,7 +25,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create MQTT client: %v", err)
 	}
-	
+
 	fmt.Println("one")
 
 	if err := client.Connect(); err != nil {
@@ -34,11 +34,11 @@ func main() {
 	defer client.Disconnect()
 
 	fmt.Println("two")
-	
+
 	if err := client.Subscribe("localunit.pepeunit.com/bcc4d500-5417-4ecd-b1f8-436964709fea", 0); err != nil {
 		log.Printf("Failed to subscribe: %v", err)
 	}
-	
+
 	if err := client.Subscribe("localunit.pepeunit.com/ad1edef4-dfc7-488e-b7d2-6022e56eb0db", 0); err != nil {
 		log.Printf("Failed to subscribe: %v", err)
 	}
