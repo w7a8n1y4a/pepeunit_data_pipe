@@ -196,7 +196,6 @@ func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 	}
 
 	if c.connected && c.cm != nil {
-		log.Printf("Sending subscribe for %s", topic)
 		_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
 			Subscriptions: []paho.SubscribeOptions{
 				{Topic: topic, QoS: qos},
