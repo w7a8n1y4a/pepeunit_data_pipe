@@ -1,60 +1,56 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/caarlos0/env"
-	"github.com/joho/godotenv"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+	"fmt"
+
+	"data_pipe/internal/clients/mqtt_client"
+	"data_pipe/internal/config"
 )
 
-type Config struct {
-	BACKEND_SECRET_KEY      string `env:"BACKEND_SECRET_KEY" envDefault:""`
-	SQLALCHEMY_DATABASE_URL string `env:"SQLALCHEMY_DATABASE_URL" envDefault:""`
-	CLICKHOUSE_DATABASE_URL string `env:"CLICKHOUSE_DATABASE_URL" envDefault:""`
-	REDIS_URL               string `env:"REDIS_URL" envDefault:""`
-	MQTT_HOST				string `env:"MQTT_HOST" envDefault:""`
-	MQTT_SECURE				bool   `env:"MQTT_SECURE" envDefault:"true"`
-	MQTT_PORT				int    `env:"MQTT_PORT" envDefault:"1883"`
- 	MQTT_KEEPALIVE			int    `env:"MQTT_KEEPALIVE" envDefault:"60"`
-}
-
-func generateToken(secretKey string) (string, error) {
-	claims := jwt.MapClaims{
-		"domain": "example.com",
-		"type":   "Backend",
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	signedToken, err := token.SignedString([]byte(secretKey))
-	if err != nil {
-		return "", fmt.Errorf("failed to sign token: %v", err)
-	}
-
-	return signedToken, nil
-}
-
-
 func main() {
-	err := godotenv.Load()
+	cfg, err := config.Load()
 	if err != nil {
-		log.Printf("No .env file found or error loading .env file: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
-
-	cfg := Config{}
-	if err := env.Parse(&cfg); err != nil {
-		log.Fatal(err)
-	}
+		
 	fmt.Printf("Config: %+v\n", cfg)
-	
-	token, err := generateToken(cfg.BACKEND_SECRET_KEY)
-	if err != nil {
-		fmt.Println("Error generating token:", err)
-		return
-	}
-	
-	fmt.Println("Generated JWT token:", token)
 
+	// Create message handler
+	messageHandler := func(topic string, payload []byte) {
+		log.Printf("Received message on topic %s: %s", topic, string(payload))
+	}
+
+	// Create MQTT client
+	client, err := mqtt_client.New(cfg, messageHandler)
+	if err != nil {
+		log.Fatalf("Failed to create MQTT client: %v", err)
+	}
+
+	// Connect to MQTT broker
+	if err := client.Connect(); err != nil {
+		log.Fatalf("Failed to connect to MQTT broker: %v", err)
+	}
+	defer client.Disconnect()
+
+	// Subscribe to topics
+	if err := client.Subscribe("localunit.pepeunit.com/bcc4d500-5417-4ecd-b1f8-436964709fea", 1); err != nil {
+		log.Printf("Failed to subscribe to topic: %v", err)
+	}
+
+	// Add another subscription later
+	time.Sleep(5 * time.Second)
+	if err := client.Subscribe("localunit.pepeunit.com/fc486c3e-7d2b-4fdb-b559-ca49db1416b4", 1); err != nil {
+		log.Printf("Failed to subscribe to topic: %v", err)
+	}
+
+	// Wait for shutdown signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	log.Println("Shutting down...")
 }
