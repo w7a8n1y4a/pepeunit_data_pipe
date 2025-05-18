@@ -24,9 +24,7 @@ type SubscribeOptions struct {
 type ClientOption func(*MQTTClient)
 
 func WithReconnectInterval(interval time.Duration) ClientOption {
-	return func(c *MQTTClient) {
-		// Can be expanded if needed
-	}
+	return func(c *MQTTClient) {}
 }
 
 type MQTTClient struct {
@@ -196,6 +194,7 @@ func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 	}
 
 	if c.connected && c.cm != nil {
+		log.Printf("Sending subscribe for %s", topic)
 		_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
 			Subscriptions: []paho.SubscribeOptions{
 				{Topic: topic, QoS: qos},

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
+	"data_pipe/internal/database"
 )
 
 func main() {
@@ -26,23 +28,47 @@ func main() {
 		log.Fatalf("Failed to create MQTT client: %v", err)
 	}
 
-	fmt.Println("one")
-
 	if err := client.Connect(); err != nil {
 		log.Fatalf("Failed to connect to MQTT broker: %v", err)
 	}
 	defer client.Disconnect()
 
-	fmt.Println("two")
+	db, err := database.New(cfg.SQLALCHEMY_DATABASE_URL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
 
-	if err := client.Subscribe("localunit.pepeunit.com/bcc4d500-5417-4ecd-b1f8-436964709fea", 0); err != nil {
-		log.Printf("Failed to subscribe: %v", err)
+	ctx := context.Background()
+
+	activeNodes, err := db.GetActiveUnitNodes(ctx)
+	if err != nil {
+		log.Fatalf("Failed to get active unit nodes: %v", err)
 	}
 
-	if err := client.Subscribe("localunit.pepeunit.com/ad1edef4-dfc7-488e-b7d2-6022e56eb0db", 0); err != nil {
-		log.Printf("Failed to subscribe: %v", err)
+	for _, node := range activeNodes {
+		log.Printf("Processing node: %s (Topic: %s)", node.UUID, node.TopicName)
+
+		fullTopicName := fmt.Sprintf("%s/%s", cfg.BACKEND_DOMAIN, node.UUID)
+		log.Printf("Subscribing to topic: %s", fullTopicName)
+
+		if err := client.Subscribe(fullTopicName, 0); err != nil {
+			errorMsg := fmt.Sprintf("Failed to subscribe to topic: %v", err)
+			if err := db.UpdateUnitNodeStatus(ctx, node.UUID, database.DataPipeStatusError, &errorMsg); err != nil {
+				log.Printf("Failed to update node status: %v", err)
+			}
+			continue
+		}
+
+		var emptyError *string = nil
+		if err := db.UpdateUnitNodeStatus(ctx, node.UUID, database.DataPipeStatusActive, emptyError); err != nil {
+			log.Printf("Failed to update node status: %v", err)
+		}
+
+		if node.DataPipeYML != nil {
+			log.Printf("Pipeline config for %s: %s", fullTopicName, *node.DataPipeYML)
+		}
 	}
-	fmt.Println("three")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
