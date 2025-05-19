@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// DataPipeStatus представляет собой статус конвейера данных
 type DataPipeStatus string
 
 const (
@@ -17,7 +16,6 @@ const (
 	DataPipeStatusError    DataPipeStatus = "Error"
 )
 
-// UnitNode представляет собой состояние input или output топика Unit
 type UnitNode struct {
 	UUID               uuid.UUID `db:"uuid"`
 	Type               string    `db:"type"`
@@ -35,7 +33,6 @@ type UnitNode struct {
 	UnitUUID           uuid.UUID `db:"unit_uuid"`
 }
 
-// GetUnitNodeByUUID получает UnitNode по UUID
 func (db *DB) GetUnitNodeByUUID(ctx context.Context, uuid uuid.UUID) (*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
@@ -58,7 +55,6 @@ func (db *DB) GetUnitNodeByUUID(ctx context.Context, uuid uuid.UUID) (*UnitNode,
 	return node, nil
 }
 
-// GetUnitNodesByUnitUUID получает все UnitNode для конкретного Unit
 func (db *DB) GetUnitNodesByUnitUUID(ctx context.Context, unitUUID uuid.UUID) ([]*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
@@ -94,7 +90,6 @@ func (db *DB) GetUnitNodesByUnitUUID(ctx context.Context, unitUUID uuid.UUID) ([
 	return nodes, nil
 }
 
-// GetActiveUnitNodes получает все активные UnitNode (is_data_pipe_active = true)
 func (db *DB) GetActiveUnitNodes(ctx context.Context) ([]*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
@@ -130,7 +125,6 @@ func (db *DB) GetActiveUnitNodes(ctx context.Context) ([]*UnitNode, error) {
 	return nodes, nil
 }
 
-// GetUnitNodeByTopicName получает UnitNode по имени топика
 func (db *DB) GetUnitNodeByTopicName(ctx context.Context, topicName string) (*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
@@ -153,7 +147,6 @@ func (db *DB) GetUnitNodeByTopicName(ctx context.Context, topicName string) (*Un
 	return node, nil
 }
 
-// UpdateUnitNodeStatus обновляет статус и ошибку конвейера данных
 func (db *DB) UpdateUnitNodeStatus(ctx context.Context, uuid uuid.UUID, status DataPipeStatus, errorMsg *string) error {
 	query := `
 		UPDATE units_nodes
