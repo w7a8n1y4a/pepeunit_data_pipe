@@ -128,14 +128,17 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context) {
 	// Start Redis stream processing
 	if c.redis != nil {
 		go func() {
+			lastID := "$" // Start from the latest message only
+			log.Printf("Starting Redis stream processing from ID: %s", lastID)
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
 					// Read from Redis stream
+					log.Printf("Attempting to read from Redis stream with lastID: %s", lastID)
 					streams, err := c.redis.XRead(ctx, &redis.XReadArgs{
-						Streams: []string{"unit_nodes_updates", "0"},
+						Streams: []string{"backend_data_pipe_nodes", lastID},
 						Block:   0,
 					}).Result()
 
@@ -145,8 +148,12 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context) {
 						continue
 					}
 
+					log.Printf("Received %d streams from Redis", len(streams))
 					for _, stream := range streams {
+						log.Printf("Processing stream: %s with %d messages", stream.Stream, len(stream.Messages))
 						for _, message := range stream.Messages {
+							lastID = message.ID // Update last processed ID
+							log.Printf("Processing message ID: %s", message.ID)
 							var update struct {
 								Action string            `json:"action"`
 								Node   database.UnitNode `json:"node"`

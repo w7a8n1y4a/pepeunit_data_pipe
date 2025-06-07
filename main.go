@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"data_pipe/internal/clients/mqtt_client"
@@ -41,12 +42,20 @@ func main() {
 	defer postgresDB.Close()
 
 	// Initialize Redis client
+	redisURL := strings.TrimPrefix(cfg.REDIS_URL, "redis://")
+	redisURL = strings.TrimSuffix(redisURL, "/0")
 	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.REDIS_URL,
+		Addr:     redisURL,
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
 	defer redisClient.Close()
+
+	// Test Redis connection
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	log.Printf("Successfully connected to Redis at %s", redisURL)
 
 	// 3. Initialize DataPipe processor and load configurations
 	processor := datapipe.NewProcessor(clickhouseDB, postgresDB)
