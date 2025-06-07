@@ -161,13 +161,13 @@ func (db *DB) UpdateUnitNodeStatus(ctx context.Context, uuid uuid.UUID, status D
 	return nil
 }
 
-func (db *DB) UpdateUnitNodeState(ctx context.Context, uuid uuid.UUID, state string) error {
+func (db *DB) UpdateUnitNodeState(ctx context.Context, uuid uuid.UUID, state string, updateTime time.Time) error {
 	query := `
 		UPDATE units_nodes
-		SET state = $1, last_update_datetime = CURRENT_TIMESTAMP
-		WHERE uuid = $2`
+		SET state = $1, last_update_datetime = $2
+		WHERE uuid = $3`
 
-	_, err := db.pool.Exec(ctx, query, state, uuid)
+	_, err := db.pool.Exec(ctx, query, state, updateTime, uuid)
 	if err != nil {
 		return fmt.Errorf("failed to update unit node state: %w", err)
 	}

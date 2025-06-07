@@ -192,7 +192,7 @@ func main() {
 		}
 
 		// Update node state
-		if err := db.UpdateUnitNodeState(ctx, node.UUID, "25.5"); err != nil {
+		if err := db.UpdateUnitNodeState(ctx, node.UUID, "25.5", time.Now().UTC()); err != nil {
 			log.Printf("Failed to update node state: %v", err)
 		} else {
 			log.Printf("Successfully updated state for node %s", node.UUID)
