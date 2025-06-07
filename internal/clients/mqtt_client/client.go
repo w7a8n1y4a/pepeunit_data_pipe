@@ -241,6 +241,41 @@ func (c *MQTTClient) Disconnect() {
 	c.wg.Wait()
 }
 
+func (c *MQTTClient) Unsubscribe(topic string) error {
+	log.Printf("Attempting to unsubscribe from %s", topic)
+
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		c.mu.Lock()
+		close(lockAcquired)
+	}()
+
+	select {
+	case <-lockAcquired:
+		defer c.mu.Unlock()
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for lock while unsubscribing from %s", topic)
+	}
+
+	delete(c.subscriptions, topic)
+
+	if c.connected && c.cm != nil {
+		log.Printf("Sending unsubscribe for %s", topic)
+		_, err := c.cm.Unsubscribe(c.ctx, &paho.Unsubscribe{
+			Topics: []string{topic},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to unsubscribe from topic %s: %w", topic, err)
+		}
+		log.Printf("Successfully unsubscribed from %s", topic)
+	}
+
+	return nil
+}
+
 func generateToken(cfg *config.Config) (string, error) {
 	claims := jwt.MapClaims{
 		"domain": cfg.BACKEND_DOMAIN,
