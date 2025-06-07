@@ -146,37 +146,42 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 							continue
 						}
 
-						nodeData, ok := msg.Values["node"].(string)
+						unitNodeData, ok := msg.Values["unit_node_data"].(string)
+						fmt.Println("unitNodeData", unitNodeData)
 						if !ok {
-							log.Printf("Invalid message format: missing node data")
+							log.Printf("Invalid message format: missing unit_node_data")
 							continue
 						}
 
-						var node struct {
-							UUID        string `json:"uuid"`
-							TopicName   string `json:"topic_name"`
-							DataPipeYML string `json:"data_pipe_yml"`
+						var unitNode struct {
+							UUID        string  `json:"uuid"`
+							TopicName   string  `json:"topic_name"`
+							DataPipeYML *string `json:"data_pipe_yml"`
 						}
 
-						if err := json.Unmarshal([]byte(nodeData), &node); err != nil {
-							log.Printf("Failed to parse node data: %v", err)
+						if err := json.Unmarshal([]byte(unitNodeData), &unitNode); err != nil {
+							log.Printf("Failed to parse unit node data: %v", err)
 							continue
 						}
 
 						// Update configurations and subscriptions
 						switch action {
-						case "add", "update":
-							c.Set(node.UUID, node.DataPipeYML)
-							topic := fmt.Sprintf("%s/%s", "backend_domain", node.UUID)
-							if err := mqttClient.Subscribe(topic, 0); err != nil {
-								log.Printf("Failed to subscribe to topic %s: %v", topic, err)
+						case "Update":
+							if unitNode.DataPipeYML != nil {
+								c.Set(unitNode.UUID, *unitNode.DataPipeYML)
+								topic := fmt.Sprintf("%s/%s", "backend_domain", unitNode.UUID)
+								if err := mqttClient.Subscribe(topic, 0); err != nil {
+									log.Printf("Failed to subscribe to topic %s: %v", topic, err)
+								}
 							}
-						case "remove":
-							c.Remove(node.UUID)
-							topic := fmt.Sprintf("%s/%s", "backend_domain", node.UUID)
+						case "Delete":
+							topic := fmt.Sprintf("%s/%s", "backend_domain", unitNode.UUID)
 							if err := mqttClient.Unsubscribe(topic); err != nil {
 								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
 							}
+							c.Remove(unitNode.UUID)
+						default:
+							log.Printf("Unknown action: %s", action)
 						}
 					}
 				}
