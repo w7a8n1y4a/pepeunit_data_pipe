@@ -83,13 +83,27 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Clear existing configs
-	c.configs = make(map[string]string)
+	// Create a map of existing configs for quick lookup
+	existingConfigs := make(map[string]struct{})
+	for uuid := range c.configs {
+		existingConfigs[uuid] = struct{}{}
+	}
 
-	// Load new configs
+	// Update configs and track which ones are still active
+	activeConfigs := make(map[string]struct{})
 	for _, node := range nodes {
+		activeConfigs[node.UUID.String()] = struct{}{}
 		if node.DataPipeYML != nil {
 			c.configs[node.UUID.String()] = *node.DataPipeYML
+			log.Printf("Loaded configuration for node %s", node.UUID)
+		}
+	}
+
+	// Remove configs for nodes that are no longer active
+	for uuid := range existingConfigs {
+		if _, active := activeConfigs[uuid]; !active {
+			delete(c.configs, uuid)
+			log.Printf("Removed configuration for inactive node %s", uuid)
 		}
 	}
 
@@ -103,13 +117,54 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
+		log.Printf("Starting periodic configuration sync from PostgreSQL (every 5 minutes)")
+
 		for {
 			select {
 			case <-ctx.Done():
+				log.Printf("Stopping periodic configuration sync")
 				return
 			case <-ticker.C:
+				log.Printf("Starting periodic configuration sync from PostgreSQL")
 				if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
 					log.Printf("Failed to sync configurations from PostgreSQL: %v", err)
+				} else {
+					log.Printf("Successfully synced configurations from PostgreSQL")
+
+					// Update MQTT subscriptions after successful sync
+					nodes, err := postgresDB.GetActiveUnitNodes(ctx)
+					if err != nil {
+						log.Printf("Failed to get active nodes for MQTT subscription update: %v", err)
+						continue
+					}
+
+					// Create a map of existing subscriptions
+					existingSubscriptions := make(map[string]struct{})
+					for _, node := range nodes {
+						if node.DataPipeYML != nil {
+							topic := fmt.Sprintf("%s/%s", "backend_domain", node.UUID)
+							existingSubscriptions[topic] = struct{}{}
+
+							// Subscribe to new topics
+							if err := mqttClient.Subscribe(topic, 0); err != nil {
+								log.Printf("Failed to subscribe to topic %s: %v", topic, err)
+							} else {
+								log.Printf("Subscribed to topic %s", topic)
+							}
+						}
+					}
+
+					// Get current subscriptions and unsubscribe from inactive ones
+					currentSubscriptions := mqttClient.GetSubscriptions()
+					for topic := range currentSubscriptions {
+						if _, exists := existingSubscriptions[topic]; !exists {
+							if err := mqttClient.Unsubscribe(topic); err != nil {
+								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
+							} else {
+								log.Printf("Unsubscribed from inactive topic %s", topic)
+							}
+						}
+					}
 				}
 			}
 		}
@@ -172,12 +227,16 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 								topic := fmt.Sprintf("%s/%s", "backend_domain", unitNode.UUID)
 								if err := mqttClient.Subscribe(topic, 0); err != nil {
 									log.Printf("Failed to subscribe to topic %s: %v", topic, err)
+								} else {
+									log.Printf("Subscribed to topic %s", topic)
 								}
 							}
 						case "Delete":
 							topic := fmt.Sprintf("%s/%s", "backend_domain", unitNode.UUID)
 							if err := mqttClient.Unsubscribe(topic); err != nil {
 								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
+							} else {
+								log.Printf("Unsubscribed from topic %s", topic)
 							}
 							c.Remove(unitNode.UUID)
 						default:

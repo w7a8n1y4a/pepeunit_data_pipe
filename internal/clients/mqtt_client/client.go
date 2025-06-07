@@ -291,3 +291,16 @@ func generateToken(cfg *config.Config) (string, error) {
 
 	return signedToken, nil
 }
+
+// GetSubscriptions returns a map of current subscriptions
+func (c *MQTTClient) GetSubscriptions() map[string]struct{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Create a copy of the subscriptions map
+	subs := make(map[string]struct{}, len(c.subscriptions))
+	for topic := range c.subscriptions {
+		subs[topic] = struct{}{}
+	}
+	return subs
+}
