@@ -191,6 +191,13 @@ func main() {
 			log.Printf("Failed to update node status: %v", err)
 		}
 
+		// Update node state
+		if err := db.UpdateUnitNodeState(ctx, node.UUID, "25.5"); err != nil {
+			log.Printf("Failed to update node state: %v", err)
+		} else {
+			log.Printf("Successfully updated state for node %s", node.UUID)
+		}
+
 		if node.DataPipeYML != nil {
 			log.Printf("Pipeline config for %s: %s", fullTopicName, *node.DataPipeYML)
 		}
