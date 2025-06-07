@@ -7,50 +7,42 @@ import (
 	"strings"
 	"time"
 
+	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/database"
-
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 )
 
+// Processor handles message processing and configuration management
 type Processor struct {
-	clickhouseDB *database.ClickHouseDB
-	postgresDB   *database.PostgresDB
-	configs      *DataPipeConfigs
+	clickhouse *database.ClickHouseDB
+	postgres   *database.PostgresDB
+	configs    *DataPipeConfigs
 }
 
-func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.PostgresDB) *Processor {
+// NewProcessor creates a new Processor instance
+func NewProcessor(clickhouse *database.ClickHouseDB, postgres *database.PostgresDB) *Processor {
 	return &Processor{
-		clickhouseDB: clickhouseDB,
-		postgresDB:   postgresDB,
-		configs:      NewDataPipeConfigs(),
+		clickhouse: clickhouse,
+		postgres:   postgres,
+		configs:    NewDataPipeConfigs(),
 	}
 }
 
-// LoadNodeConfigs loads all active node configurations from PostgreSQL
+// LoadNodeConfigs loads active node configurations from PostgreSQL
 func (p *Processor) LoadNodeConfigs(ctx context.Context) error {
-	p.configs.SetPostgres(p.postgresDB)
-	return p.configs.LoadFromDB(ctx)
+	return p.configs.LoadNodeConfigs(ctx, p.postgres)
 }
 
 // StartConfigSync starts background processes for configuration synchronization
-func (p *Processor) StartConfigSync(ctx context.Context, redisClient *redis.Client, mqttClient MQTTClient) {
-	p.configs.SetRedis(redisClient)
-	p.configs.SetMQTT(mqttClient)
-	p.configs.StartConfigSync(ctx)
+func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
+	p.configs.StartConfigSync(ctx, p.postgres, redisDB, mqttClient)
 }
 
+// ProcessMessage processes a message from a topic
 func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []byte) error {
 	// Extract node UUID from topic
-	// Topic format: backend_domain/node_uuid
-	parts := strings.Split(topic, "/")
-	if len(parts) != 2 {
+	nodeUUID := extractNodeUUID(topic)
+	if nodeUUID == "" {
 		return fmt.Errorf("invalid topic format: %s", topic)
-	}
-
-	nodeUUID, err := uuid.Parse(parts[1])
-	if err != nil {
-		return fmt.Errorf("failed to parse node UUID from topic %s: %w", topic, err)
 	}
 
 	// Get node configuration
@@ -59,8 +51,20 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return fmt.Errorf("no configuration found for node %s", nodeUUID)
 	}
 
-	log.Printf("Processing message from topic %s with config: %s", topic, config)
+	log.Printf("Processing message for node %s with config: %s", nodeUUID, config)
+
+	// TODO: Implement actual message processing logic
 	return nil
+}
+
+// extractNodeUUID extracts the node UUID from a topic
+func extractNodeUUID(topic string) string {
+	// Topic format: backend_domain/node_uuid
+	parts := strings.Split(topic, "/")
+	if len(parts) != 2 {
+		return ""
+	}
+	return parts[1]
 }
 
 // isConfigActive checks if the configuration is active based on its active period

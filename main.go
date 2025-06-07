@@ -6,15 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe"
-
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -42,20 +39,11 @@ func main() {
 	defer postgresDB.Close()
 
 	// Initialize Redis client
-	redisURL := strings.TrimPrefix(cfg.REDIS_URL, "redis://")
-	redisURL = strings.TrimSuffix(redisURL, "/0")
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     redisURL,
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-	defer redisClient.Close()
-
-	// Test Redis connection
-	if err := redisClient.Ping(ctx).Err(); err != nil {
+	redisDB, err := database.NewRedis(cfg.REDIS_URL)
+	if err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
-	log.Printf("Successfully connected to Redis at %s", redisURL)
+	defer redisDB.Close()
 
 	// 3. Initialize DataPipe processor and load configurations
 	processor := datapipe.NewProcessor(clickhouseDB, postgresDB)
@@ -84,7 +72,7 @@ func main() {
 	defer mqttClient.Disconnect()
 
 	// 6. Start configuration synchronization
-	processor.StartConfigSync(ctx, redisClient, mqttClient)
+	processor.StartConfigSync(ctx, redisDB, mqttClient)
 
 	// Subscribe to initial set of topics
 	activeNodes, err := postgresDB.GetActiveUnitNodes(ctx)
