@@ -8,37 +8,39 @@ import (
 	"time"
 
 	"data_pipe/internal/clients/mqtt_client"
+	"data_pipe/internal/config"
 	"data_pipe/internal/database"
 )
 
 // Processor handles message processing and configuration management
 type Processor struct {
-	clickhouse *database.ClickHouseDB
-	postgres   *database.PostgresDB
-	configs    *DataPipeConfigs
+	clickhouseDB *database.ClickHouseDB
+	postgresDB   *database.PostgresDB
+	configs      *DataPipeConfigs
 }
 
 // NewProcessor creates a new Processor instance
-func NewProcessor(clickhouse *database.ClickHouseDB, postgres *database.PostgresDB) *Processor {
+func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.PostgresDB, cfg *config.Config) *Processor {
 	return &Processor{
-		clickhouse: clickhouse,
-		postgres:   postgres,
-		configs:    NewDataPipeConfigs(),
+		clickhouseDB: clickhouseDB,
+		postgresDB:   postgresDB,
+		configs:      NewDataPipeConfigs(cfg),
 	}
 }
 
 // LoadNodeConfigs loads active node configurations from PostgreSQL
 func (p *Processor) LoadNodeConfigs(ctx context.Context) error {
-	return p.configs.LoadNodeConfigs(ctx, p.postgres)
+	return p.configs.LoadNodeConfigs(ctx, p.postgresDB)
 }
 
 // StartConfigSync starts background processes for configuration synchronization
 func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
-	p.configs.StartConfigSync(ctx, p.postgres, redisDB, mqttClient)
+	p.configs.StartConfigSync(ctx, p.postgresDB, redisDB, mqttClient)
 }
 
 // ProcessMessage processes a message from a topic
 func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []byte) error {
+	fmt.Println("topic_one", topic)
 	// Extract node UUID from topic
 	nodeUUID := extractNodeUUID(topic)
 	if nodeUUID == "" {
@@ -83,4 +85,9 @@ func isConfigActive(period ActivePeriod) bool {
 	default:
 		return false
 	}
+}
+
+// SetConfigs sets the DataPipeConfigs instance
+func (p *Processor) SetConfigs(configs *DataPipeConfigs) {
+	p.configs = configs
 }

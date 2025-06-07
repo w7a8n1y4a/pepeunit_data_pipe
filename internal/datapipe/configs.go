@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"data_pipe/internal/clients/mqtt_client"
+	"data_pipe/internal/config"
 	"data_pipe/internal/database"
 
 	"github.com/redis/go-redis/v9"
@@ -21,12 +22,14 @@ type DataPipeConfigs struct {
 	postgres *database.PostgresDB
 	redis    *redis.Client
 	mqtt     MQTTClient
+	cfg      *config.Config
 }
 
 // NewDataPipeConfigs creates a new DataPipeConfigs instance
-func NewDataPipeConfigs() *DataPipeConfigs {
+func NewDataPipeConfigs(cfg *config.Config) *DataPipeConfigs {
 	return &DataPipeConfigs{
 		configs: make(map[string]string),
+		cfg:     cfg,
 	}
 }
 
@@ -142,7 +145,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 					existingSubscriptions := make(map[string]struct{})
 					for _, node := range nodes {
 						if node.DataPipeYML != nil {
-							topic := fmt.Sprintf("%s/%s", "backend_domain", node.UUID)
+							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
 							existingSubscriptions[topic] = struct{}{}
 
 							// Subscribe to new topics
@@ -224,7 +227,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 						case "Update":
 							if unitNode.DataPipeYML != nil {
 								c.Set(unitNode.UUID, *unitNode.DataPipeYML)
-								topic := fmt.Sprintf("%s/%s", "backend_domain", unitNode.UUID)
+								topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
 								if err := mqttClient.Subscribe(topic, 0); err != nil {
 									log.Printf("Failed to subscribe to topic %s: %v", topic, err)
 								} else {
@@ -232,7 +235,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 								}
 							}
 						case "Delete":
-							topic := fmt.Sprintf("%s/%s", "backend_domain", unitNode.UUID)
+							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
 							if err := mqttClient.Unsubscribe(topic); err != nil {
 								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
 							} else {
