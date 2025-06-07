@@ -6,7 +6,45 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type PostgresDB struct {
+	pool *pgxpool.Pool
+}
+
+func NewPostgres(connString string) (*PostgresDB, error) {
+	pool, err := pgxpool.New(context.Background(), connString)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create connection pool: %w", err)
+	}
+
+	if err := pool.Ping(context.Background()); err != nil {
+		return nil, fmt.Errorf("unable to ping database: %w", err)
+	}
+
+	return &PostgresDB{pool: pool}, nil
+}
+
+func (db *PostgresDB) Close() {
+	if db.pool != nil {
+		db.pool.Close()
+	}
+}
+
+func (db *PostgresDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
+	return db.pool.Query(ctx, query, args...)
+}
+
+func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
+	return db.pool.QueryRow(ctx, query, args...)
+}
+
+func (db *PostgresDB) Exec(ctx context.Context, query string, args ...interface{}) error {
+	_, err := db.pool.Exec(ctx, query, args...)
+	return err
+}
 
 type DataPipeStatus string
 
@@ -33,7 +71,7 @@ type UnitNode struct {
 	UnitUUID           uuid.UUID `db:"unit_uuid"`
 }
 
-func (db *DB) GetUnitNodeByUUID(ctx context.Context, uuid uuid.UUID) (*UnitNode, error) {
+func (db *PostgresDB) GetUnitNodeByUUID(ctx context.Context, uuid uuid.UUID) (*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
 			create_datetime, state, last_update_datetime, is_data_pipe_active,
@@ -55,7 +93,7 @@ func (db *DB) GetUnitNodeByUUID(ctx context.Context, uuid uuid.UUID) (*UnitNode,
 	return node, nil
 }
 
-func (db *DB) GetUnitNodesByUnitUUID(ctx context.Context, unitUUID uuid.UUID) ([]*UnitNode, error) {
+func (db *PostgresDB) GetUnitNodesByUnitUUID(ctx context.Context, unitUUID uuid.UUID) ([]*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
 			create_datetime, state, last_update_datetime, is_data_pipe_active,
@@ -90,7 +128,7 @@ func (db *DB) GetUnitNodesByUnitUUID(ctx context.Context, unitUUID uuid.UUID) ([
 	return nodes, nil
 }
 
-func (db *DB) GetActiveUnitNodes(ctx context.Context) ([]*UnitNode, error) {
+func (db *PostgresDB) GetActiveUnitNodes(ctx context.Context) ([]*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
 			create_datetime, state, last_update_datetime, is_data_pipe_active,
@@ -125,7 +163,7 @@ func (db *DB) GetActiveUnitNodes(ctx context.Context) ([]*UnitNode, error) {
 	return nodes, nil
 }
 
-func (db *DB) GetUnitNodeByTopicName(ctx context.Context, topicName string) (*UnitNode, error) {
+func (db *PostgresDB) GetUnitNodeByTopicName(ctx context.Context, topicName string) (*UnitNode, error) {
 	query := `
 		SELECT uuid, type, visibility_level, is_rewritable_input, topic_name,
 			create_datetime, state, last_update_datetime, is_data_pipe_active,
@@ -147,7 +185,7 @@ func (db *DB) GetUnitNodeByTopicName(ctx context.Context, topicName string) (*Un
 	return node, nil
 }
 
-func (db *DB) UpdateUnitNodeStatus(ctx context.Context, uuid uuid.UUID, status DataPipeStatus, errorMsg *string) error {
+func (db *PostgresDB) UpdateUnitNodeStatus(ctx context.Context, uuid uuid.UUID, status DataPipeStatus, errorMsg *string) error {
 	query := `
 		UPDATE units_nodes
 		SET data_pipe_status = $1, data_pipe_error = $2
@@ -161,7 +199,7 @@ func (db *DB) UpdateUnitNodeStatus(ctx context.Context, uuid uuid.UUID, status D
 	return nil
 }
 
-func (db *DB) UpdateUnitNodeState(ctx context.Context, uuid uuid.UUID, state string, updateTime time.Time) error {
+func (db *PostgresDB) UpdateUnitNodeState(ctx context.Context, uuid uuid.UUID, state string, updateTime time.Time) error {
 	query := `
 		UPDATE units_nodes
 		SET state = $1, last_update_datetime = $2

@@ -161,13 +161,13 @@ func main() {
 	}
 	defer client.Disconnect()
 
-	db, err := database.New(cfg.SQLALCHEMY_DATABASE_URL)
+	postgresDB, err := database.NewPostgres(cfg.SQLALCHEMY_DATABASE_URL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer postgresDB.Close()
 
-	activeNodes, err := db.GetActiveUnitNodes(ctx)
+	activeNodes, err := postgresDB.GetActiveUnitNodes(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get active unit nodes: %v", err)
 	}
@@ -180,19 +180,19 @@ func main() {
 
 		if err := client.Subscribe(fullTopicName, 0); err != nil {
 			errorMsg := fmt.Sprintf("Failed to subscribe to topic: %v", err)
-			if err := db.UpdateUnitNodeStatus(ctx, node.UUID, database.DataPipeStatusError, &errorMsg); err != nil {
+			if err := postgresDB.UpdateUnitNodeStatus(ctx, node.UUID, database.DataPipeStatusError, &errorMsg); err != nil {
 				log.Printf("Failed to update node status: %v", err)
 			}
 			continue
 		}
 
 		var emptyError *string = nil
-		if err := db.UpdateUnitNodeStatus(ctx, node.UUID, database.DataPipeStatusActive, emptyError); err != nil {
+		if err := postgresDB.UpdateUnitNodeStatus(ctx, node.UUID, database.DataPipeStatusActive, emptyError); err != nil {
 			log.Printf("Failed to update node status: %v", err)
 		}
 
 		// Update node state
-		if err := db.UpdateUnitNodeState(ctx, node.UUID, "25.5", time.Now().UTC()); err != nil {
+		if err := postgresDB.UpdateUnitNodeState(ctx, node.UUID, "25.5", time.Now().UTC()); err != nil {
 			log.Printf("Failed to update node state: %v", err)
 		} else {
 			log.Printf("Successfully updated state for node %s", node.UUID)
