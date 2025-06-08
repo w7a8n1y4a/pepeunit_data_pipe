@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe/active_period"
 	"data_pipe/internal/datapipe/filters"
-	"data_pipe/internal/types"
 )
 
 // Processor handles message processing and configuration management
@@ -50,37 +48,17 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return fmt.Errorf("invalid topic format: %s", topic)
 	}
 
-	// Get node configuration
 	config, exists := p.configs.Get(nodeUUID)
 	if !exists {
-		return fmt.Errorf("no configuration found for node %s", nodeUUID)
+		return nil
 	}
 
-	// Check if the message should be processed based on active period
 	currentTime := time.Now()
 	if !active_period.IsActive(&config.ActivePeriod, currentTime) {
 		return nil
 	}
 
-	// Convert payload based on input type
-	var value interface{}
-	if config.Filters.TypeInputValue == types.TypeInputValueNumber {
-		// Try to parse as number first
-		if num, err := strconv.ParseFloat(string(payload), 64); err == nil {
-			value = num
-		} else {
-			// If parsing fails, use as string
-			value = string(payload)
-		}
-	} else {
-		value = string(payload)
-	}
-
-	// Apply filters
-	shouldProcess, err := filters.ApplyFilters(value, config.Filters)
-	if err != nil {
-		return fmt.Errorf("failed to apply filters: %w", err)
-	}
+	shouldProcess := filters.ApplyFilters(string(payload), config.Filters)
 	if !shouldProcess {
 		return nil
 	}

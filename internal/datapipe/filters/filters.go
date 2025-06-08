@@ -1,72 +1,55 @@
 package filters
 
 import (
+	"data_pipe/internal/types"
 	"fmt"
 	"strconv"
-
-	"data_pipe/internal/types"
+	"strings"
 )
 
 // ApplyFilters applies filtering rules to the input value
-func ApplyFilters(value interface{}, config types.FiltersConfig) (bool, error) {
-	// Convert input value based on type
-	var stringValue string
+func ApplyFilters(value string, config types.FiltersConfig) bool {
 	var numericValue *float64
 
-	switch v := value.(type) {
-	case string:
-		stringValue = v
-		if config.TypeInputValue == types.TypeInputValueNumber {
-			val, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				return false, fmt.Errorf("failed to parse numeric value: %w", err)
-			}
-			numericValue = &val
+	value = strings.Replace(value, ",", ".", -1)
+
+	if config.TypeInputValue == types.TypeInputValueNumber {
+		val, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return false
 		}
-	case float64:
-		numericValue = &v
-		stringValue = strconv.FormatFloat(v, 'f', -1, 64)
-	case int:
-		f := float64(v)
-		numericValue = &f
-		stringValue = strconv.Itoa(v)
-	case int64:
-		f := float64(v)
-		numericValue = &f
-		stringValue = strconv.FormatInt(v, 10)
-	default:
-		return false, fmt.Errorf("unsupported value type: %T", value)
+		numericValue = &val
 	}
 
 	// Apply filtering rules
 	if config.TypeValueFiltering != nil {
 		switch *config.TypeValueFiltering {
 		case types.FilterTypeValueFilteringWhiteList:
-			if !isInList(stringValue, config.FilteringValues) {
-				return false, nil
+			if !isInList(value, config.FilteringValues) {
+				return false
 			}
 		case types.FilterTypeValueFilteringBlackList:
-			if isInList(stringValue, config.FilteringValues) {
-				return false, nil
+			if isInList(value, config.FilteringValues) {
+				return false
 			}
 		}
 	}
 
 	// Apply threshold rules for numeric values
-	if numericValue != nil && config.TypeValueThreshold != nil {
+	if config.TypeInputValue == types.TypeInputValueNumber && config.TypeValueThreshold != nil {
 		switch *config.TypeValueThreshold {
 		case types.FilterTypeValueThresholdMin:
-			if config.ThresholdMin != nil && *numericValue < float64(*config.ThresholdMin) {
-				return false, nil
+			if *numericValue < float64(*config.ThresholdMin) {
+				return false
 			}
 		case types.FilterTypeValueThresholdMax:
-			if config.ThresholdMax != nil && *numericValue > float64(*config.ThresholdMax) {
-				return false, nil
+			if *numericValue > float64(*config.ThresholdMax) {
+				return false
 			}
 		case types.FilterTypeValueThresholdRange:
-			if (config.ThresholdMin != nil && *numericValue < float64(*config.ThresholdMin)) ||
-				(config.ThresholdMax != nil && *numericValue > float64(*config.ThresholdMax)) {
-				return false, nil
+			if *numericValue < float64(*config.ThresholdMin) ||
+				*numericValue > float64(*config.ThresholdMax) {
+				return false
 			}
 		}
 	}
@@ -76,17 +59,18 @@ func ApplyFilters(value interface{}, config types.FiltersConfig) (bool, error) {
 		// TODO: Implement rate limiting logic
 	}
 
-	// Apply size limit
-	if config.MaxSize > 0 && len(stringValue) > config.MaxSize {
-		return false, nil
-	}
-
 	// Apply uniqueness check
 	if config.LastUniqueCheck {
 		// TODO: Implement uniqueness check logic
 	}
 
-	return true, nil
+	// Apply size limit
+	if config.MaxSize > 0 && len(string(value)) > config.MaxSize {
+		fmt.Println(value)
+		return false
+	}
+
+	return true
 }
 
 // isInList checks if a value is in the list of values
@@ -99,10 +83,6 @@ func isInList(value string, list []interface{}) bool {
 			}
 		case float64:
 			if num, err := strconv.ParseFloat(value, 64); err == nil && num == v {
-				return true
-			}
-		case int:
-			if num, err := strconv.Atoi(value); err == nil && num == v {
 				return true
 			}
 		}
