@@ -13,6 +13,7 @@ import (
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe/active_period"
 	"data_pipe/internal/datapipe/filters"
+	"data_pipe/internal/datapipe/transformations"
 )
 
 // NodeState stores the state for a single node
@@ -88,15 +89,23 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return nil
 	}
 
-	fmt.Println(string(payload))
+	transformedValue := string(payload)
+	if config.Transformations != nil {
+		// Apply transformations
+		var err error
+		transformedValue, err = transformations.ApplyTransformations(string(payload), config.Transformations, &config.Filters)
+		if err != nil {
+			return nil
+		}
+	}
 
 	// Update node state
 	nodeState.mu.Lock()
 	nodeState.LastMessageTime = currentTime
-	nodeState.LastValue = string(payload)
+	nodeState.LastValue = transformedValue
 	nodeState.mu.Unlock()
 
-	log.Printf("Processing message for node %s", nodeUUID)
+	log.Printf("Success '%s' %s", transformedValue, nodeUUID)
 
 	// TODO: Implement actual message processing logic
 	return nil
