@@ -11,6 +11,7 @@ import (
 	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
+	"data_pipe/internal/types"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -62,11 +63,19 @@ func (c *DataPipeConfigs) Set(nodeUUID, config string) {
 }
 
 // Get retrieves a node's configuration
-func (c *DataPipeConfigs) Get(nodeUUID string) (string, bool) {
+func (c *DataPipeConfigs) Get(nodeUUID string) (types.DataPipeConfig, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	config, exists := c.configs[nodeUUID]
-	return config, exists
+	configStr, exists := c.configs[nodeUUID]
+	if !exists {
+		return types.DataPipeConfig{}, false
+	}
+
+	var config types.DataPipeConfig
+	if err := json.Unmarshal([]byte(configStr), &config); err != nil {
+		return types.DataPipeConfig{}, false
+	}
+	return config, true
 }
 
 // Remove removes a node's configuration

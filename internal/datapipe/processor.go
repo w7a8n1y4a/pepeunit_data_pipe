@@ -10,6 +10,8 @@ import (
 	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
+	"data_pipe/internal/datapipe/active_period"
+	"data_pipe/internal/types"
 )
 
 // Processor handles message processing and configuration management
@@ -55,6 +57,15 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 
 	log.Printf("Processing message for node %s with config: %s", nodeUUID, config)
 
+	// Check if the message should be processed based on active period
+	currentTime := time.Now()
+	if !active_period.IsActive(&config.ActivePeriod, currentTime) {
+		log.Printf("Message skipped: not in active period for node %s", nodeUUID)
+		return nil
+	}
+
+	fmt.Println("config", config)
+
 	// TODO: Implement actual message processing logic
 	return nil
 }
@@ -70,17 +81,17 @@ func extractNodeUUID(topic string) string {
 }
 
 // isConfigActive checks if the configuration is active based on its active period
-func isConfigActive(period ActivePeriod) bool {
+func isConfigActive(period types.ActivePeriod) bool {
 	now := time.Now()
 
 	switch period.Type {
-	case ActivePeriodTypePermanent:
+	case types.ActivePeriodTypePermanent:
 		return true
-	case ActivePeriodTypeFromDate:
+	case types.ActivePeriodTypeFromDate:
 		return period.Start != nil && now.After(*period.Start)
-	case ActivePeriodTypeToDate:
+	case types.ActivePeriodTypeToDate:
 		return period.End != nil && now.Before(*period.End)
-	case ActivePeriodTypeDateRange:
+	case types.ActivePeriodTypeDateRange:
 		return period.Start != nil && period.End != nil && now.After(*period.Start) && now.Before(*period.End)
 	default:
 		return false

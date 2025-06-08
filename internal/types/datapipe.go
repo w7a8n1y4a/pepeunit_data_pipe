@@ -1,8 +1,6 @@
-package datapipe
+package types
 
-import (
-	"time"
-)
+import "time"
 
 // ActivePeriodType represents the type of active period
 type ActivePeriodType string
