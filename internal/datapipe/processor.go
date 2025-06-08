@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe/active_period"
+	"data_pipe/internal/datapipe/filters"
 	"data_pipe/internal/types"
 )
 
@@ -42,7 +44,6 @@ func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.Redis
 
 // ProcessMessage processes a message from a topic
 func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []byte) error {
-	fmt.Println("topic_one", topic)
 	// Extract node UUID from topic
 	nodeUUID := extractNodeUUID(topic)
 	if nodeUUID == "" {
@@ -55,16 +56,36 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return fmt.Errorf("no configuration found for node %s", nodeUUID)
 	}
 
-	log.Printf("Processing message for node %s with config: %s", nodeUUID, config)
-
 	// Check if the message should be processed based on active period
 	currentTime := time.Now()
 	if !active_period.IsActive(&config.ActivePeriod, currentTime) {
-		log.Printf("Message skipped: not in active period for node %s", nodeUUID)
 		return nil
 	}
 
-	fmt.Println("config", config)
+	// Convert payload based on input type
+	var value interface{}
+	if config.Filters.TypeInputValue == types.TypeInputValueNumber {
+		// Try to parse as number first
+		if num, err := strconv.ParseFloat(string(payload), 64); err == nil {
+			value = num
+		} else {
+			// If parsing fails, use as string
+			value = string(payload)
+		}
+	} else {
+		value = string(payload)
+	}
+
+	// Apply filters
+	shouldProcess, err := filters.ApplyFilters(value, config.Filters)
+	if err != nil {
+		return fmt.Errorf("failed to apply filters: %w", err)
+	}
+	if !shouldProcess {
+		return nil
+	}
+
+	log.Printf("Processing message for node %s", nodeUUID)
 
 	// TODO: Implement actual message processing logic
 	return nil
@@ -78,24 +99,6 @@ func extractNodeUUID(topic string) string {
 		return ""
 	}
 	return parts[1]
-}
-
-// isConfigActive checks if the configuration is active based on its active period
-func isConfigActive(period types.ActivePeriod) bool {
-	now := time.Now()
-
-	switch period.Type {
-	case types.ActivePeriodTypePermanent:
-		return true
-	case types.ActivePeriodTypeFromDate:
-		return period.Start != nil && now.After(*period.Start)
-	case types.ActivePeriodTypeToDate:
-		return period.End != nil && now.Before(*period.End)
-	case types.ActivePeriodTypeDateRange:
-		return period.Start != nil && period.End != nil && now.After(*period.Start) && now.Before(*period.End)
-	default:
-		return false
-	}
 }
 
 // SetConfigs sets the DataPipeConfigs instance

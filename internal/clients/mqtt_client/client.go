@@ -95,13 +95,10 @@ func (c *MQTTClient) Connect() error {
 				c.mu.Unlock()
 
 				if !wasConnected {
-					log.Printf("MQTT connection established with session present: %v", connAck.SessionPresent)
-					log.Printf("Connection properties: %+v", connAck.Properties)
 					if err := c.resubscribe(); err != nil {
 						log.Printf("Failed to resubscribe: %v", err)
-					} else {
-						log.Printf("Successfully resubscribed to all topics")
 					}
+					log.Printf("Successfully connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
 				}
 			},
 			OnConnectError: func(err error) {
@@ -128,15 +125,11 @@ func (c *MQTTClient) Connect() error {
 
 		// Register message handler for all topics
 		c.router.RegisterHandler("#", func(p *paho.Publish) {
-			log.Printf("Received message on topic %s with payload length %d", p.Topic, len(p.Payload))
-			log.Printf("Message payload: %s", string(p.Payload))
 			c.messageHandler(p.Topic, p.Payload)
 		})
 
 		// Also register for specific topics
 		c.router.RegisterHandler("+", func(p *paho.Publish) {
-			log.Printf("Received message on specific topic %s with payload length %d", p.Topic, len(p.Payload))
-			log.Printf("Message payload: %s", string(p.Payload))
 			c.messageHandler(p.Topic, p.Payload)
 		})
 
@@ -176,15 +169,13 @@ func (c *MQTTClient) connectionMonitor() {
 			c.mu.RUnlock()
 
 			if !connected {
-				log.Println("MQTT connection lost, attempting to reconnect...")
+				log.Printf("MQTT connection lost, attempting to reconnect...")
 			}
 		}
 	}
 }
 
 func (c *MQTTClient) Subscribe(topic string, qos byte) error {
-	log.Printf("Attempting to subscribe to %s with QoS %d", topic, qos)
-
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
 
@@ -207,7 +198,6 @@ func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 	}
 
 	if c.connected && c.cm != nil {
-		log.Printf("Sending subscribe request for %s", topic)
 		_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
 			Subscriptions: []paho.SubscribeOptions{
 				{Topic: topic, QoS: qos},
@@ -217,9 +207,7 @@ func (c *MQTTClient) Subscribe(topic string, qos byte) error {
 			delete(c.subscriptions, topic)
 			return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
 		}
-		log.Printf("Successfully subscribed to %s", topic)
-	} else {
-		log.Printf("Not connected to MQTT broker, subscription for %s will be processed when connection is established", topic)
+		log.Printf("Active subscriptions: %d", len(c.subscriptions))
 	}
 
 	return nil
@@ -230,14 +218,11 @@ func (c *MQTTClient) resubscribe() error {
 	defer c.mu.RUnlock()
 
 	if len(c.subscriptions) == 0 {
-		log.Printf("No subscriptions to resubscribe")
 		return nil
 	}
 
-	log.Printf("Resubscribing to %d topics", len(c.subscriptions))
 	subs := make([]paho.SubscribeOptions, 0, len(c.subscriptions))
-	for topic, opts := range c.subscriptions {
-		log.Printf("Resubscribing to topic: %s with QoS %d", topic, opts.QoS)
+	for _, opts := range c.subscriptions {
 		subs = append(subs, opts)
 	}
 
@@ -248,7 +233,6 @@ func (c *MQTTClient) resubscribe() error {
 		return fmt.Errorf("failed to resubscribe: %w", err)
 	}
 
-	log.Printf("Successfully resubscribed to all topics")
 	return nil
 }
 
@@ -261,8 +245,6 @@ func (c *MQTTClient) Disconnect() {
 }
 
 func (c *MQTTClient) Unsubscribe(topic string) error {
-	log.Printf("Attempting to unsubscribe from %s", topic)
-
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
 
@@ -282,14 +264,13 @@ func (c *MQTTClient) Unsubscribe(topic string) error {
 	delete(c.subscriptions, topic)
 
 	if c.connected && c.cm != nil {
-		log.Printf("Sending unsubscribe for %s", topic)
 		_, err := c.cm.Unsubscribe(c.ctx, &paho.Unsubscribe{
 			Topics: []string{topic},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to unsubscribe from topic %s: %w", topic, err)
 		}
-		log.Printf("Successfully unsubscribed from %s", topic)
+		log.Printf("Active subscriptions: %d", len(c.subscriptions))
 	}
 
 	return nil

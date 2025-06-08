@@ -49,7 +49,7 @@ func NewClickHouse(connString string) (*ClickHouseDB, error) {
 		Settings: clickhouse.Settings{
 			"max_execution_time": 60,
 		},
-		Debug: true,
+		Debug: false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to connect to clickhouse: %w", err)

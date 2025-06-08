@@ -107,7 +107,6 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 		activeConfigs[node.UUID.String()] = struct{}{}
 		if node.DataPipeYML != nil {
 			c.configs[node.UUID.String()] = *node.DataPipeYML
-			log.Printf("Loaded configuration for node %s", node.UUID)
 		}
 	}
 
@@ -115,7 +114,6 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 	for uuid := range existingConfigs {
 		if _, active := activeConfigs[uuid]; !active {
 			delete(c.configs, uuid)
-			log.Printf("Removed configuration for inactive node %s", uuid)
 		}
 	}
 
@@ -129,20 +127,16 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
-		log.Printf("Starting periodic configuration sync from PostgreSQL (every 5 minutes)")
+		log.Printf("Starting PostgreSQL periodic configuration sync (every 5 minutes)")
 
 		for {
 			select {
 			case <-ctx.Done():
-				log.Printf("Stopping periodic configuration sync")
 				return
 			case <-ticker.C:
-				log.Printf("Starting periodic configuration sync from PostgreSQL")
 				if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
 					log.Printf("Failed to sync configurations from PostgreSQL: %v", err)
 				} else {
-					log.Printf("Successfully synced configurations from PostgreSQL")
-
 					// Update MQTT subscriptions after successful sync
 					nodes, err := postgresDB.GetActiveUnitNodes(ctx)
 					if err != nil {
@@ -152,6 +146,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 
 					// Create a map of existing subscriptions
 					existingSubscriptions := make(map[string]struct{})
+					subscribedCount := 0
 					for _, node := range nodes {
 						if node.DataPipeYML != nil {
 							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
@@ -161,22 +156,24 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 							if err := mqttClient.Subscribe(topic, 0); err != nil {
 								log.Printf("Failed to subscribe to topic %s: %v", topic, err)
 							} else {
-								log.Printf("Subscribed to topic %s", topic)
+								subscribedCount++
 							}
 						}
 					}
 
 					// Get current subscriptions and unsubscribe from inactive ones
 					currentSubscriptions := mqttClient.GetSubscriptions()
+					unsubscribedCount := 0
 					for topic := range currentSubscriptions {
 						if _, exists := existingSubscriptions[topic]; !exists {
 							if err := mqttClient.Unsubscribe(topic); err != nil {
 								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
 							} else {
-								log.Printf("Unsubscribed from inactive topic %s", topic)
+								unsubscribedCount++
 							}
 						}
 					}
+					log.Printf("MQTT subscriptions updated: +%d -%d", subscribedCount, unsubscribedCount)
 				}
 			}
 		}
@@ -185,14 +182,13 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 	// Start Redis stream processing
 	go func() {
 		lastID := "$" // Start from the latest message
-		log.Printf("Starting Redis stream processing from ID: %s", lastID)
+		log.Printf("Starting Redis stream processing")
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				log.Printf("Reading from Redis stream with lastID: %s", lastID)
 				messages, err := redisDB.ReadStream(ctx, "backend_data_pipe_nodes", lastID)
 				if err != nil {
 					log.Printf("Failed to read from Redis stream: %v", err)
@@ -203,20 +199,16 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 				if len(messages) > 0 {
 					log.Printf("Received %d messages from Redis stream", len(messages))
 					for _, msg := range messages {
-						log.Printf("Processing message ID: %s", msg.ID)
 						lastID = msg.ID
 
 						// Parse message
 						action, ok := msg.Values["action"].(string)
 						if !ok {
-							log.Printf("Invalid message format: missing action")
 							continue
 						}
 
 						unitNodeData, ok := msg.Values["unit_node_data"].(string)
-						fmt.Println("unitNodeData", unitNodeData)
 						if !ok {
-							log.Printf("Invalid message format: missing unit_node_data")
 							continue
 						}
 
@@ -227,7 +219,6 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 						}
 
 						if err := json.Unmarshal([]byte(unitNodeData), &unitNode); err != nil {
-							log.Printf("Failed to parse unit node data: %v", err)
 							continue
 						}
 
@@ -239,20 +230,14 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 								topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
 								if err := mqttClient.Subscribe(topic, 0); err != nil {
 									log.Printf("Failed to subscribe to topic %s: %v", topic, err)
-								} else {
-									log.Printf("Subscribed to topic %s", topic)
 								}
 							}
 						case "Delete":
 							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
 							if err := mqttClient.Unsubscribe(topic); err != nil {
 								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
-							} else {
-								log.Printf("Unsubscribed from topic %s", topic)
 							}
 							c.Remove(unitNode.UUID)
-						default:
-							log.Printf("Unknown action: %s", action)
 						}
 					}
 				}

@@ -2,15 +2,11 @@ package active_period
 
 import (
 	"data_pipe/internal/types"
-	"fmt"
 	"time"
 )
 
 // IsActive checks if the configuration is active based on its active period
 func IsActive(period *types.ActivePeriod, currentTime time.Time) bool {
-
-	fmt.Println("period", period)
-
 	switch period.Type {
 	case types.ActivePeriodTypePermanent:
 		return true

@@ -55,50 +55,39 @@ func main() {
 
 	// 4. Create message handler
 	messageHandler := func(topic string, payload []byte) {
-		fmt.Println("topic", topic)
 		if err := processor.ProcessMessage(ctx, topic, payload); err != nil {
-			log.Printf("Failed to process message from topic %s: %v", topic, err)
 			return
 		}
-		log.Printf("Successfully processed message from topic %s", topic)
 	}
 
 	// 5. Initialize MQTT client
-	log.Printf("Initializing MQTT client with broker at %s:%d", cfg.MQTT_HOST, cfg.MQTT_PORT)
 	mqttClient, err := mqtt_client.New(cfg, messageHandler)
 	if err != nil {
 		log.Fatalf("Failed to create MQTT client: %v", err)
 	}
 
-	log.Printf("Connecting to MQTT broker...")
 	if err := mqttClient.Connect(); err != nil {
 		log.Fatalf("Failed to connect to MQTT broker: %v", err)
 	}
-	log.Printf("Successfully connected to MQTT broker")
 	defer mqttClient.Disconnect()
 
 	// 6. Start configuration synchronization
-	log.Printf("Starting configuration synchronization...")
 	processor.StartConfigSync(ctx, redisDB, mqttClient)
 
 	// Subscribe to initial set of topics
-	log.Printf("Getting active unit nodes for initial subscription...")
 	activeNodes, err := postgresDB.GetActiveUnitNodes(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get active unit nodes: %v", err)
 	}
+	log.Printf("Successfully get %d unit nodes with active pipe", len(activeNodes))
 
-	log.Printf("Found %d active nodes", len(activeNodes))
 	for _, node := range activeNodes {
 		if node.DataPipeYML != nil {
 			fullTopicName := fmt.Sprintf("%s/%s", cfg.BACKEND_DOMAIN, node.UUID)
-			log.Printf("Subscribing to topic: %s", fullTopicName)
 
 			if err := mqttClient.Subscribe(fullTopicName, 0); err != nil {
-				log.Printf("Failed to subscribe to topic %s: %v", fullTopicName, err)
 				continue
 			}
-			log.Printf("Successfully subscribed to topic: %s", fullTopicName)
 		}
 	}
 
