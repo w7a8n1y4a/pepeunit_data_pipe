@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"data_pipe/internal/clients/mqtt_client"
@@ -14,11 +15,20 @@ import (
 	"data_pipe/internal/datapipe/filters"
 )
 
+// NodeState stores the state for a single node
+type NodeState struct {
+	LastMessageTime time.Time
+	LastValue       string
+	mu              sync.RWMutex
+}
+
 // Processor handles message processing and configuration management
 type Processor struct {
 	clickhouseDB *database.ClickHouseDB
 	postgresDB   *database.PostgresDB
 	configs      *DataPipeConfigs
+	nodeStates   map[string]*NodeState
+	statesMu     sync.RWMutex
 }
 
 // NewProcessor creates a new Processor instance
@@ -27,6 +37,7 @@ func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.Post
 		clickhouseDB: clickhouseDB,
 		postgresDB:   postgresDB,
 		configs:      NewDataPipeConfigs(cfg),
+		nodeStates:   make(map[string]*NodeState),
 	}
 }
 
@@ -38,6 +49,19 @@ func (p *Processor) LoadNodeConfigs(ctx context.Context) error {
 // StartConfigSync starts background processes for configuration synchronization
 func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
 	p.configs.StartConfigSync(ctx, p.postgresDB, redisDB, mqttClient)
+}
+
+// getNodeState returns or creates a NodeState for the given node
+func (p *Processor) getNodeState(nodeUUID string) *NodeState {
+	p.statesMu.Lock()
+	defer p.statesMu.Unlock()
+
+	state, exists := p.nodeStates[nodeUUID]
+	if !exists {
+		state = &NodeState{}
+		p.nodeStates[nodeUUID] = state
+	}
+	return state
 }
 
 // ProcessMessage processes a message from a topic
@@ -58,10 +82,19 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return nil
 	}
 
-	shouldProcess := filters.ApplyFilters(string(payload), config.Filters)
+	nodeState := p.getNodeState(nodeUUID)
+	shouldProcess := filters.ApplyFilters(string(payload), config.Filters, nodeState.LastMessageTime, nodeState.LastValue)
 	if !shouldProcess {
 		return nil
 	}
+
+	fmt.Println(string(payload))
+
+	// Update node state
+	nodeState.mu.Lock()
+	nodeState.LastMessageTime = currentTime
+	nodeState.LastValue = string(payload)
+	nodeState.mu.Unlock()
 
 	log.Printf("Processing message for node %s", nodeUUID)
 

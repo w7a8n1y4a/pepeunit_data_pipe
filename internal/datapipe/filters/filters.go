@@ -2,25 +2,12 @@ package filters
 
 import (
 	"data_pipe/internal/types"
-	"fmt"
 	"strconv"
-	"strings"
+	"time"
 )
 
 // ApplyFilters applies filtering rules to the input value
-func ApplyFilters(value string, config types.FiltersConfig) bool {
-	var numericValue *float64
-
-	value = strings.Replace(value, ",", ".", -1)
-
-	if config.TypeInputValue == types.TypeInputValueNumber {
-		val, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return false
-		}
-		numericValue = &val
-	}
-
+func ApplyFilters(value string, config types.FiltersConfig, lastMessageTime time.Time, lastValue string) bool {
 	// Apply filtering rules
 	if config.TypeValueFiltering != nil {
 		switch *config.TypeValueFiltering {
@@ -35,38 +22,44 @@ func ApplyFilters(value string, config types.FiltersConfig) bool {
 		}
 	}
 
-	// Apply threshold rules for numeric values
-	if config.TypeInputValue == types.TypeInputValueNumber && config.TypeValueThreshold != nil {
-		switch *config.TypeValueThreshold {
-		case types.FilterTypeValueThresholdMin:
-			if *numericValue < float64(*config.ThresholdMin) {
-				return false
-			}
-		case types.FilterTypeValueThresholdMax:
-			if *numericValue > float64(*config.ThresholdMax) {
-				return false
-			}
-		case types.FilterTypeValueThresholdRange:
-			if *numericValue < float64(*config.ThresholdMin) ||
-				*numericValue > float64(*config.ThresholdMax) {
-				return false
+	// Apply threshold rules
+	if config.TypeValueThreshold != nil {
+		// Try to parse value as float64
+		numValue, err := strconv.ParseFloat(value, 64)
+		if err == nil {
+			switch *config.TypeValueThreshold {
+			case types.FilterTypeValueThresholdMin:
+				if config.ThresholdMin != nil && numValue < float64(*config.ThresholdMin) {
+					return false
+				}
+			case types.FilterTypeValueThresholdMax:
+				if config.ThresholdMax != nil && numValue > float64(*config.ThresholdMax) {
+					return false
+				}
+			case types.FilterTypeValueThresholdRange:
+				if (config.ThresholdMin != nil && numValue < float64(*config.ThresholdMin)) ||
+					(config.ThresholdMax != nil && numValue > float64(*config.ThresholdMax)) {
+					return false
+				}
 			}
 		}
 	}
 
 	// Apply rate limiting
 	if config.MaxRate > 0 {
-		// TODO: Implement rate limiting logic
-	}
-
-	// Apply uniqueness check
-	if config.LastUniqueCheck {
-		// TODO: Implement uniqueness check logic
+		timeSinceLastMessage := time.Since(lastMessageTime)
+		if timeSinceLastMessage < time.Duration(config.MaxRate)*time.Second {
+			return false
+		}
 	}
 
 	// Apply size limit
-	if config.MaxSize > 0 && len(string(value)) > config.MaxSize {
-		fmt.Println(value)
+	if config.MaxSize > 0 && len(value) > config.MaxSize {
+		return false
+	}
+
+	// Apply uniqueness check
+	if config.LastUniqueCheck && value == lastValue {
 		return false
 	}
 
