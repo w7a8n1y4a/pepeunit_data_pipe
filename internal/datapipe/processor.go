@@ -13,6 +13,7 @@ import (
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe/active_period"
 	"data_pipe/internal/datapipe/filters"
+	"data_pipe/internal/datapipe/processing_policy"
 	"data_pipe/internal/datapipe/transformations"
 )
 
@@ -98,6 +99,9 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 			return nil
 		}
 	}
+
+	// Apply processing policy
+	processing_policy.ApplyProcessingPolicy(ctx, p.postgresDB, nodeUUID, transformedValue, currentTime, config.ProcessingPolicy)
 
 	// Update node state
 	nodeState.mu.Lock()
