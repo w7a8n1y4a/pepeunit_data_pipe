@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -208,6 +209,46 @@ func (db *PostgresDB) UpdateUnitNodeState(ctx context.Context, uuid uuid.UUID, s
 	_, err := db.pool.Exec(ctx, query, state, updateTime, uuid)
 	if err != nil {
 		return fmt.Errorf("failed to update unit node state: %w", err)
+	}
+
+	return nil
+}
+
+// BulkUpdateUnitNodeStates updates multiple unit node states in a single query
+func (db *PostgresDB) BulkUpdateUnitNodeStates(ctx context.Context, updates map[uuid.UUID]struct {
+	State      string
+	UpdateTime time.Time
+}) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	query := `
+		UPDATE units_nodes AS t SET
+			state = c.state,
+			last_update_datetime = c.last_update_datetime
+		FROM (VALUES 
+	`
+
+	values := make([]interface{}, 0, len(updates)*3)
+	valueStrings := make([]string, 0, len(updates))
+
+	i := 1
+	for uuid, update := range updates {
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d)", i, i+1, i+2))
+		values = append(values, uuid, update.State, update.UpdateTime)
+		i += 3
+	}
+
+	query += strings.Join(valueStrings, ",")
+	query += `
+		) AS c(uuid, state, last_update_datetime)
+		WHERE t.uuid = c.uuid::uuid
+	`
+
+	_, err := db.pool.Exec(ctx, query, values...)
+	if err != nil {
+		return fmt.Errorf("failed to bulk update unit node states: %w", err)
 	}
 
 	return nil

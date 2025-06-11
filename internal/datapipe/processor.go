@@ -15,6 +15,13 @@ import (
 	"data_pipe/internal/datapipe/filters"
 	"data_pipe/internal/datapipe/processing_policy"
 	"data_pipe/internal/datapipe/transformations"
+
+	"github.com/google/uuid"
+)
+
+const (
+	defaultBufferFlushInterval = 5 * time.Second
+	defaultBufferMaxSize       = 10
 )
 
 // NodeState stores the state for a single node
@@ -31,15 +38,21 @@ type Processor struct {
 	configs      *DataPipeConfigs
 	nodeStates   map[string]*NodeState
 	statesMu     sync.RWMutex
+	policy       *processing_policy.ProcessingPolicy
 }
 
 // NewProcessor creates a new Processor instance
 func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.PostgresDB, cfg *config.Config) *Processor {
+	// TODO: Make buffer parameters configurable through config
+	bufferFactory := processing_policy.NewBufferFactory(postgresDB, defaultBufferFlushInterval, defaultBufferMaxSize)
+	policy := processing_policy.NewProcessingPolicy(bufferFactory)
+
 	return &Processor{
 		clickhouseDB: clickhouseDB,
 		postgresDB:   postgresDB,
 		configs:      NewDataPipeConfigs(cfg),
 		nodeStates:   make(map[string]*NodeState),
+		policy:       policy,
 	}
 }
 
@@ -51,6 +64,11 @@ func (p *Processor) LoadNodeConfigs(ctx context.Context) error {
 // StartConfigSync starts background processes for configuration synchronization
 func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
 	p.configs.StartConfigSync(ctx, p.postgresDB, redisDB, mqttClient)
+}
+
+// Stop stops all background processes
+func (p *Processor) Stop() {
+	// Nothing to stop for now
 }
 
 // getNodeState returns or creates a NodeState for the given node
@@ -101,7 +119,14 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 	}
 
 	// Apply processing policy
-	processing_policy.ApplyProcessingPolicy(ctx, p.postgresDB, nodeUUID, transformedValue, currentTime, config.ProcessingPolicy)
+	uuid, err := uuid.Parse(nodeUUID)
+	if err != nil {
+		return fmt.Errorf("invalid node UUID: %w", err)
+	}
+
+	if err := p.policy.ApplyProcessingPolicy(ctx, uuid, transformedValue, currentTime, config.ProcessingPolicy); err != nil {
+		return fmt.Errorf("failed to apply processing policy: %w", err)
+	}
 
 	// Update node state
 	nodeState.mu.Lock()
@@ -111,7 +136,6 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 
 	log.Printf("Success '%s' %s", transformedValue, nodeUUID)
 
-	// TODO: Implement actual message processing logic
 	return nil
 }
 
