@@ -61,7 +61,7 @@ func (p *ProcessingPolicy) ApplyProcessingPolicy(
 
 	case types.ProcessingPolicyTypeNRecords:
 		// TODO: Implement NRecords policy
-		return fmt.Errorf("NRecords policy not implemented")
+		return buffer.Add(ctx, nodeUUID, value, currentTime)
 
 	case types.ProcessingPolicyTypeTimeWindow:
 		// TODO: Implement TimeWindow policy

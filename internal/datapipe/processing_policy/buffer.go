@@ -42,8 +42,7 @@ func (f *BufferFactory) GetBuffer(policyType types.ProcessingPolicyType) Buffer 
 	case types.ProcessingPolicyTypeLastValue:
 		return NewMessageBuffer(f.db, f.flushInterval, f.maxSize)
 	case types.ProcessingPolicyTypeNRecords:
-		// TODO: Implement NRecords buffer
-		return nil
+		return NewNRecordsBuffer(f.clickhouseDB, f.flushInterval, f.maxSize)
 	case types.ProcessingPolicyTypeTimeWindow:
 		return NewTimeWindowBuffer(f.clickhouseDB, f.flushInterval, f.maxSize)
 	case types.ProcessingPolicyTypeAggregation:

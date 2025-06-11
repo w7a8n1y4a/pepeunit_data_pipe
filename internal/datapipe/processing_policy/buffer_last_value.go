@@ -92,6 +92,7 @@ func (b *LastValueBuffer) Flush(ctx context.Context) error {
 	defer b.mu.Unlock()
 
 	if len(b.updates) == 0 {
+		fmt.Println("one")
 		return nil
 	}
 
