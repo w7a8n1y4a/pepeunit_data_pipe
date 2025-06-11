@@ -65,7 +65,7 @@ func (p *ProcessingPolicy) ApplyProcessingPolicy(
 
 	case types.ProcessingPolicyTypeTimeWindow:
 		// TODO: Implement TimeWindow policy
-		return fmt.Errorf("TimeWindow policy not implemented")
+		return buffer.Add(ctx, nodeUUID, value, currentTime)
 
 	case types.ProcessingPolicyTypeAggregation:
 		// TODO: Implement Aggregation policy

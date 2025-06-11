@@ -21,14 +21,16 @@ type Buffer interface {
 // BufferFactory creates buffers based on policy type
 type BufferFactory struct {
 	db            *database.PostgresDB
+	clickhouseDB  *database.ClickHouseDB
 	flushInterval time.Duration
 	maxSize       int
 }
 
 // NewBufferFactory creates a new buffer factory
-func NewBufferFactory(db *database.PostgresDB, flushInterval time.Duration, maxSize int) *BufferFactory {
+func NewBufferFactory(db *database.PostgresDB, clickhouseDB *database.ClickHouseDB, flushInterval time.Duration, maxSize int) *BufferFactory {
 	return &BufferFactory{
 		db:            db,
+		clickhouseDB:  clickhouseDB,
 		flushInterval: flushInterval,
 		maxSize:       maxSize,
 	}
@@ -43,8 +45,7 @@ func (f *BufferFactory) GetBuffer(policyType types.ProcessingPolicyType) Buffer 
 		// TODO: Implement NRecords buffer
 		return nil
 	case types.ProcessingPolicyTypeTimeWindow:
-		// TODO: Implement TimeWindow buffer
-		return nil
+		return NewTimeWindowBuffer(f.clickhouseDB, f.flushInterval, f.maxSize)
 	case types.ProcessingPolicyTypeAggregation:
 		// TODO: Implement Aggregation buffer
 		return nil

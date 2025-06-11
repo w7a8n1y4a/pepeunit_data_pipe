@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	defaultBufferFlushInterval = 2 * time.Second
+	defaultBufferFlushInterval = 10 * time.Second
 	defaultBufferMaxSize       = 10
 )
 
@@ -43,7 +43,7 @@ type Processor struct {
 // NewProcessor creates a new Processor instance
 func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.PostgresDB, cfg *config.Config) *Processor {
 	// TODO: Make buffer parameters configurable through config
-	bufferFactory := processing_policy.NewBufferFactory(postgresDB, defaultBufferFlushInterval, defaultBufferMaxSize)
+	bufferFactory := processing_policy.NewBufferFactory(postgresDB, clickhouseDB, defaultBufferFlushInterval, defaultBufferMaxSize)
 	policy := processing_policy.NewProcessingPolicy(bufferFactory)
 
 	return &Processor{
@@ -128,7 +128,10 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return fmt.Errorf("invalid node UUID: %w", err)
 	}
 
-	if err := p.policy.ApplyProcessingPolicy(ctx, uuid, transformedValue, currentTime, config.ProcessingPolicy); err != nil {
+	// Create a new context with the policy configuration
+	ctxWithPolicy := context.WithValue(ctx, "policy", config.ProcessingPolicy)
+
+	if err := p.policy.ApplyProcessingPolicy(ctxWithPolicy, uuid, transformedValue, currentTime, config.ProcessingPolicy); err != nil {
 		return fmt.Errorf("failed to apply processing policy: %w", err)
 	}
 
