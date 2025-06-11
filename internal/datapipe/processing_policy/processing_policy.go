@@ -13,12 +13,27 @@ import (
 // ProcessingPolicy handles message processing based on policy type
 type ProcessingPolicy struct {
 	bufferFactory *BufferFactory
+	buffers       map[types.ProcessingPolicyType]Buffer
+	ctx           context.Context
 }
 
 // NewProcessingPolicy creates a new processing policy handler
 func NewProcessingPolicy(bufferFactory *BufferFactory) *ProcessingPolicy {
 	return &ProcessingPolicy{
 		bufferFactory: bufferFactory,
+		buffers:       make(map[types.ProcessingPolicyType]Buffer),
+	}
+}
+
+// Start starts all buffers
+func (p *ProcessingPolicy) Start(ctx context.Context) {
+	p.ctx = ctx
+}
+
+// Stop stops all buffers
+func (p *ProcessingPolicy) Stop() {
+	for _, buffer := range p.buffers {
+		buffer.Stop()
 	}
 }
 
@@ -30,9 +45,14 @@ func (p *ProcessingPolicy) ApplyProcessingPolicy(
 	currentTime time.Time,
 	policy types.ProcessingPolicyConfig,
 ) error {
-	buffer := p.bufferFactory.GetBuffer(policy.PolicyType)
-	if buffer == nil {
-		return fmt.Errorf("no buffer available for policy type: %s", policy.PolicyType)
+	buffer, exists := p.buffers[policy.PolicyType]
+	if !exists {
+		buffer = p.bufferFactory.GetBuffer(policy.PolicyType)
+		if buffer == nil {
+			return fmt.Errorf("no buffer available for policy type: %s", policy.PolicyType)
+		}
+		p.buffers[policy.PolicyType] = buffer
+		buffer.Start(p.ctx)
 	}
 
 	switch policy.PolicyType {

@@ -53,6 +53,9 @@ func main() {
 		log.Fatalf("Failed to load node configurations: %v", err)
 	}
 
+	// Start the processor
+	processor.Start(ctx)
+
 	// 4. Create message handler
 	messageHandler := func(topic string, payload []byte) {
 		if err := processor.ProcessMessage(ctx, topic, payload); err != nil {

@@ -3,6 +3,7 @@ package processing_policy
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -93,6 +94,8 @@ func (b *LastValueBuffer) Flush(ctx context.Context) error {
 	if len(b.updates) == 0 {
 		return nil
 	}
+
+	log.Printf("Send values for %v nodes to PG", len(b.updates))
 
 	if err := b.db.BulkUpdateUnitNodeStates(ctx, b.updates); err != nil {
 		return fmt.Errorf("failed to bulk update unit node states: %w", err)

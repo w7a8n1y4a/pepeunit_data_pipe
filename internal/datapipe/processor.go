@@ -3,7 +3,6 @@ package datapipe
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +19,7 @@ import (
 )
 
 const (
-	defaultBufferFlushInterval = 5 * time.Second
+	defaultBufferFlushInterval = 2 * time.Second
 	defaultBufferMaxSize       = 10
 )
 
@@ -66,9 +65,14 @@ func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.Redis
 	p.configs.StartConfigSync(ctx, p.postgresDB, redisDB, mqttClient)
 }
 
+// Start starts the processor
+func (p *Processor) Start(ctx context.Context) {
+	p.policy.Start(ctx)
+}
+
 // Stop stops all background processes
 func (p *Processor) Stop() {
-	// Nothing to stop for now
+	p.policy.Stop()
 }
 
 // getNodeState returns or creates a NodeState for the given node
@@ -133,8 +137,6 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 	nodeState.LastMessageTime = currentTime
 	nodeState.LastValue = transformedValue
 	nodeState.mu.Unlock()
-
-	log.Printf("Success '%s' %s", transformedValue, nodeUUID)
 
 	return nil
 }

@@ -226,7 +226,7 @@ func (db *PostgresDB) BulkUpdateUnitNodeStates(ctx context.Context, updates map[
 	query := `
 		UPDATE units_nodes AS t SET
 			state = c.state,
-			last_update_datetime = c.last_update_datetime
+			last_update_datetime = c.last_update_datetime::timestamp
 		FROM (VALUES 
 	`
 
@@ -236,7 +236,9 @@ func (db *PostgresDB) BulkUpdateUnitNodeStates(ctx context.Context, updates map[
 	i := 1
 	for uuid, update := range updates {
 		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d)", i, i+1, i+2))
-		values = append(values, uuid, update.State, update.UpdateTime)
+		// Format time as 'YYYY-MM-DD HH:MM:SS' with explicit timestamp cast
+		formattedTime := update.UpdateTime.Format("2006-01-02 15:04:05")
+		values = append(values, uuid, update.State, formattedTime)
 		i += 3
 	}
 
