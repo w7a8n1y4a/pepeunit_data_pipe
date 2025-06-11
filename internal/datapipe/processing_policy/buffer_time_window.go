@@ -18,6 +18,7 @@ type TimeWindowEntry struct {
 	State              string
 	UpdateTime         time.Time
 	ExpirationDateTime time.Time
+	TypeInputValue     types.TypeInputValue
 }
 
 // TimeWindowBuffer accumulates messages and periodically flushes them to the database
@@ -80,6 +81,12 @@ func (b *TimeWindowBuffer) Add(ctx context.Context, uuid uuid.UUID, state string
 		return fmt.Errorf("time window size not specified in policy")
 	}
 
+	// Get filters config from context
+	filters, ok := ctx.Value("filters").(types.FiltersConfig)
+	if !ok {
+		return fmt.Errorf("filters config not found in context")
+	}
+
 	// Calculate expiration time based on the time window size
 	expirationTime := updateTime.Add(time.Duration(*policy.TimeWindowSize) * time.Second)
 
@@ -88,6 +95,7 @@ func (b *TimeWindowBuffer) Add(ctx context.Context, uuid uuid.UUID, state string
 		State:              state,
 		UpdateTime:         updateTime,
 		ExpirationDateTime: expirationTime,
+		TypeInputValue:     filters.TypeInputValue,
 	}
 
 	// Check if we need to flush before adding new entry
@@ -141,13 +149,13 @@ func (b *TimeWindowBuffer) Flush(ctx context.Context) error {
 
 	// Convert updates to WindowEntry slice
 	entries := make([]database.WindowEntry, 0, totalEntries)
-	for uuid, nodeEntries := range updatesCopy {
+	for nodeUUID, nodeEntries := range updatesCopy {
 		for _, entry := range nodeEntries {
 			entries = append(entries, database.WindowEntry{
-				UUID:               uuid,
-				UnitNodeUUID:       uuid, // Using the same UUID for both fields as per the schema
+				UUID:               uuid.New(), // Generate new UUID for each entry
+				UnitNodeUUID:       nodeUUID,   // Use the node UUID
 				State:              entry.State,
-				StateType:          "Text", // Default to Text type, can be made configurable if needed
+				StateType:          string(entry.TypeInputValue), // Use TypeInputValue from config
 				CreateDateTime:     entry.UpdateTime,
 				ExpirationDateTime: entry.ExpirationDateTime,
 				Size:               uint32(len(entry.State)),

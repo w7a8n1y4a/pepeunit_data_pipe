@@ -128,10 +128,11 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		return fmt.Errorf("invalid node UUID: %w", err)
 	}
 
-	// Create a new context with the policy configuration
-	ctxWithPolicy := context.WithValue(ctx, "policy", config.ProcessingPolicy)
+	// Create a new context with the policy and filters configurations
+	ctxWithConfig := context.WithValue(ctx, "policy", config.ProcessingPolicy)
+	ctxWithConfig = context.WithValue(ctxWithConfig, "filters", config.Filters)
 
-	if err := p.policy.ApplyProcessingPolicy(ctxWithPolicy, uuid, transformedValue, currentTime, config.ProcessingPolicy); err != nil {
+	if err := p.policy.ApplyProcessingPolicy(ctxWithConfig, uuid, transformedValue, currentTime, config.ProcessingPolicy); err != nil {
 		return fmt.Errorf("failed to apply processing policy: %w", err)
 	}
 
