@@ -253,6 +253,7 @@ func (b *AggregationBuffer) Flush(ctx context.Context) error {
 				UnitNodeUUID:        nodeUUID,
 				State:               aggregatedValue,
 				AggregationType:     string(*policy.AggregationFunctions),
+				TimeWindowSize:      uint32(*policy.TimeWindowSize),
 				CreateDateTime:      time.Now(),
 				StartWindowDateTime: window.StartTime,
 				EndWindowDateTime:   window.EndTime,

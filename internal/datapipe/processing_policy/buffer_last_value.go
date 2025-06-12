@@ -92,11 +92,10 @@ func (b *LastValueBuffer) Flush(ctx context.Context) error {
 	defer b.mu.Unlock()
 
 	if len(b.updates) == 0 {
-		fmt.Println("one")
 		return nil
 	}
 
-	log.Printf("Send values for %v nodes to PG", len(b.updates))
+	log.Printf("Send values for %v nodes to Postgres", len(b.updates))
 
 	if err := b.db.BulkUpdateUnitNodeStates(ctx, b.updates); err != nil {
 		return fmt.Errorf("failed to bulk update unit node states: %w", err)

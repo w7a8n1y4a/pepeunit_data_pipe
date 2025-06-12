@@ -152,6 +152,7 @@ type AggregationEntry struct {
 	UnitNodeUUID        uuid.UUID
 	State               float64
 	AggregationType     string // "Avg", "Min", "Max", "Sum"
+	TimeWindowSize      uint32 // Size of the time window in seconds
 	CreateDateTime      time.Time
 	StartWindowDateTime time.Time
 	EndWindowDateTime   time.Time
@@ -170,6 +171,7 @@ func (db *ClickHouseDB) BulkCreateAggregationEntries(ctx context.Context, entrie
 			entry.UnitNodeUUID,
 			entry.State,
 			entry.AggregationType,
+			entry.TimeWindowSize,
 			entry.CreateDateTime,
 			entry.StartWindowDateTime,
 			entry.EndWindowDateTime,
