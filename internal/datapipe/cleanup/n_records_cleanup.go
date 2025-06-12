@@ -53,10 +53,9 @@ func (s *NRecordsCleanupService) Stop() {
 
 // cleanup performs the actual cleanup operation
 func (s *NRecordsCleanupService) cleanup(ctx context.Context) error {
-	log.Printf("Starting NRecords cleanup")
 	if err := s.clickhouseDB.CleanupNLastEntries(ctx); err != nil {
 		return err
 	}
-	log.Printf("NRecords cleanup completed")
+	log.Printf("Success NRecords cleanup")
 	return nil
 }

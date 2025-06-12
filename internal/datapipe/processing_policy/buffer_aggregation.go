@@ -230,7 +230,7 @@ func (b *AggregationBuffer) Flush(ctx context.Context) error {
 	if totalEntries == 0 {
 		return nil
 	}
-	log.Printf("Sending %d aggregation entries to ClickHouse", totalEntries)
+	log.Printf("Sending %d Aggregation entries to ClickHouse", totalEntries)
 
 	// Get policy from buffer
 	b.mu.Lock()
