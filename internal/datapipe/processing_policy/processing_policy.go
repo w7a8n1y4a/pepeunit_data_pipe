@@ -60,16 +60,13 @@ func (p *ProcessingPolicy) ApplyProcessingPolicy(
 		return buffer.Add(ctx, nodeUUID, value, currentTime)
 
 	case types.ProcessingPolicyTypeNRecords:
-		// TODO: Implement NRecords policy
 		return buffer.Add(ctx, nodeUUID, value, currentTime)
 
 	case types.ProcessingPolicyTypeTimeWindow:
-		// TODO: Implement TimeWindow policy
 		return buffer.Add(ctx, nodeUUID, value, currentTime)
 
 	case types.ProcessingPolicyTypeAggregation:
-		// TODO: Implement Aggregation policy
-		return fmt.Errorf("Aggregation policy not implemented")
+		return buffer.Add(ctx, nodeUUID, value, currentTime)
 
 	default:
 		return fmt.Errorf("unknown processing policy type: %s", policy.PolicyType)

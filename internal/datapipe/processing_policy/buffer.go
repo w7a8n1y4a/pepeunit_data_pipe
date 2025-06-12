@@ -46,8 +46,7 @@ func (f *BufferFactory) GetBuffer(policyType types.ProcessingPolicyType) Buffer 
 	case types.ProcessingPolicyTypeTimeWindow:
 		return NewTimeWindowBuffer(f.clickhouseDB, f.flushInterval, f.maxSize)
 	case types.ProcessingPolicyTypeAggregation:
-		// TODO: Implement Aggregation buffer
-		return nil
+		return NewAggregationBuffer(f.clickhouseDB, f.flushInterval, f.maxSize)
 	default:
 		return nil
 	}
