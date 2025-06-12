@@ -185,3 +185,29 @@ func (db *ClickHouseDB) BulkCreateAggregationEntries(ctx context.Context, entrie
 
 	return nil
 }
+
+// CleanupNLastEntries removes entries that exceed max_count for each unit_node_uuid
+func (db *ClickHouseDB) CleanupNLastEntries(ctx context.Context) error {
+	query := `
+		ALTER TABLE n_last_entry
+		DELETE WHERE uuid IN (
+			SELECT uuid
+			FROM (
+				SELECT
+					uuid,
+					ROW_NUMBER() OVER (
+						PARTITION BY unit_node_uuid
+						ORDER BY create_datetime DESC
+					) as row_num,
+					max_count
+				FROM n_last_entry
+			) AS numbered_records
+			WHERE row_num > max_count
+		)`
+
+	if err := db.conn.Exec(ctx, query); err != nil {
+		return fmt.Errorf("failed to cleanup NLast entries: %w", err)
+	}
+
+	return nil
+}

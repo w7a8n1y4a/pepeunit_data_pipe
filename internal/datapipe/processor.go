@@ -11,6 +11,7 @@ import (
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe/active_period"
+	"data_pipe/internal/datapipe/cleanup"
 	"data_pipe/internal/datapipe/filters"
 	"data_pipe/internal/datapipe/processing_policy"
 	"data_pipe/internal/datapipe/transformations"
@@ -38,6 +39,7 @@ type Processor struct {
 	nodeStates   map[string]*NodeState
 	statesMu     sync.RWMutex
 	policy       *processing_policy.ProcessingPolicy
+	cleanup      *cleanup.NRecordsCleanupService
 }
 
 // NewProcessor creates a new Processor instance
@@ -45,6 +47,7 @@ func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.Post
 	// TODO: Make buffer parameters configurable through config
 	bufferFactory := processing_policy.NewBufferFactory(postgresDB, clickhouseDB, defaultBufferFlushInterval, defaultBufferMaxSize)
 	policy := processing_policy.NewProcessingPolicy(bufferFactory)
+	cleanup := cleanup.NewNRecordsCleanupService(clickhouseDB, cfg)
 
 	return &Processor{
 		clickhouseDB: clickhouseDB,
@@ -52,6 +55,7 @@ func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.Post
 		configs:      NewDataPipeConfigs(cfg),
 		nodeStates:   make(map[string]*NodeState),
 		policy:       policy,
+		cleanup:      cleanup,
 	}
 }
 
@@ -68,11 +72,13 @@ func (p *Processor) StartConfigSync(ctx context.Context, redisDB *database.Redis
 // Start starts the processor
 func (p *Processor) Start(ctx context.Context) {
 	p.policy.Start(ctx)
+	p.cleanup.Start(ctx)
 }
 
 // Stop stops all background processes
 func (p *Processor) Stop() {
 	p.policy.Stop()
+	p.cleanup.Stop()
 }
 
 // getNodeState returns or creates a NodeState for the given node
