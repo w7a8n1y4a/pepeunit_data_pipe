@@ -15,6 +15,8 @@ type Config struct {
 	MQTT_PORT                 int    `env:"MQTT_PORT" envDefault:"1883"`
 	MQTT_KEEPALIVE            int    `env:"MQTT_KEEPALIVE" envDefault:"60"`
 	NRECORDS_CLEANUP_INTERVAL int    `env:"NRECORDS_CLEANUP_INTERVAL" envDefault:"60"` // Interval in seconds
+	BUFFER_FLUSH_INTERVAL     int    `env:"BUFFER_FLUSH_INTERVAL" envDefault:"5"`      // Buffer flush interval in seconds
+	BUFFER_MAX_SIZE           int    `env:"BUFFER_MAX_SIZE" envDefault:"200"`          // Maximum number of entries in buffer
 }
 
 func Load() (*Config, error) {

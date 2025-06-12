@@ -19,11 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	defaultBufferFlushInterval = 10 * time.Second
-	defaultBufferMaxSize       = 10
-)
-
 // NodeState stores the state for a single node
 type NodeState struct {
 	LastMessageTime time.Time
@@ -44,8 +39,12 @@ type Processor struct {
 
 // NewProcessor creates a new Processor instance
 func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.PostgresDB, cfg *config.Config) *Processor {
-	// TODO: Make buffer parameters configurable through config
-	bufferFactory := processing_policy.NewBufferFactory(postgresDB, clickhouseDB, defaultBufferFlushInterval, defaultBufferMaxSize)
+	bufferFactory := processing_policy.NewBufferFactory(
+		postgresDB,
+		clickhouseDB,
+		time.Duration(cfg.BUFFER_FLUSH_INTERVAL)*time.Second,
+		cfg.BUFFER_MAX_SIZE,
+	)
 	policy := processing_policy.NewProcessingPolicy(bufferFactory)
 	cleanup := cleanup.NewNRecordsCleanupService(clickhouseDB, cfg)
 
