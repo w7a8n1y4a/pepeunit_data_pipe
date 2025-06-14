@@ -98,7 +98,7 @@ func (c *MQTTClient) Connect() error {
 					if err := c.resubscribe(); err != nil {
 						log.Printf("Failed to resubscribe: %v", err)
 					}
-					log.Printf("Successfully connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
+					log.Printf("Success connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
 				}
 			},
 			OnConnectError: func(err error) {
@@ -303,4 +303,11 @@ func (c *MQTTClient) GetSubscriptions() map[string]struct{} {
 		subs[topic] = struct{}{}
 	}
 	return subs
+}
+
+// GetSubscriptionCount returns the number of current subscriptions
+func (c *MQTTClient) GetSubscriptionCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.subscriptions)
 }

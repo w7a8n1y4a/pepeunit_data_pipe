@@ -82,7 +82,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get active unit nodes: %v", err)
 	}
-	log.Printf("Successfully get %d unit nodes with active pipe", len(activeNodes))
+	log.Printf("Success get %d unit nodes with active pipe", len(activeNodes))
 
 	for _, node := range activeNodes {
 		if node.DataPipeYML != nil {
@@ -93,6 +93,7 @@ func main() {
 			}
 		}
 	}
+	log.Printf("Active subs: %d", mqttClient.GetSubscriptionCount())
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)

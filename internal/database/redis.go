@@ -40,7 +40,7 @@ func NewRedis(url string) (*RedisDB, error) {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
-	log.Printf("Successfully connected to Redis at %s (DB: %d)", redisURL, dbNum)
+	log.Printf("Success connected to Redis at %s (DB: %d)", redisURL, dbNum)
 	return &RedisDB{client: client}, nil
 }
 

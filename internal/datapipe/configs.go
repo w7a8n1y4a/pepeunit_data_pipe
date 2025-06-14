@@ -124,10 +124,10 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *database.PostgresDB, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
 	// Start periodic sync from PostgreSQL
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(time.Duration(c.cfg.CONFIG_SYNC_INTERVAL) * time.Second)
 		defer ticker.Stop()
 
-		log.Printf("Starting PostgreSQL periodic configuration sync (every 5 minutes)")
+		log.Printf("Starting PostgreSQL periodic configuration sync (every %d seconds)", c.cfg.CONFIG_SYNC_INTERVAL)
 
 		for {
 			select {
