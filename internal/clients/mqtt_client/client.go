@@ -103,6 +103,11 @@ func (c *MQTTClient) Connect() error {
 			},
 			OnConnectError: func(err error) {
 				log.Printf("MQTT connection error: %v", err)
+				c.mu.Lock()
+				c.connected = false
+				c.mu.Unlock()
+				// Try to reconnect
+				go c.reconnect()
 			},
 			ClientConfig: paho.ClientConfig{
 				ClientID: c.cfg.BACKEND_DOMAIN,
@@ -112,12 +117,16 @@ func (c *MQTTClient) Connect() error {
 					c.mu.Lock()
 					c.connected = false
 					c.mu.Unlock()
+					// Try to reconnect
+					go c.reconnect()
 				},
 				OnServerDisconnect: func(disconnect *paho.Disconnect) {
 					c.mu.Lock()
 					c.connected = false
 					c.mu.Unlock()
 					log.Printf("MQTT server disconnected: %v", disconnect)
+					// Try to reconnect
+					go c.reconnect()
 				},
 			},
 			ConnectUsername: token,
@@ -153,6 +162,24 @@ func (c *MQTTClient) Connect() error {
 	return connectErr
 }
 
+// reconnect attempts to reconnect to the MQTT broker
+func (c *MQTTClient) reconnect() {
+	// Add a small delay to prevent rapid reconnection attempts
+	time.Sleep(time.Second)
+
+	c.mu.Lock()
+	if c.connected {
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+
+	log.Printf("Attempting to reconnect to MQTT broker...")
+	if err := c.Connect(); err != nil {
+		log.Printf("Failed to reconnect to MQTT broker: %v", err)
+	}
+}
+
 func (c *MQTTClient) connectionMonitor() {
 	defer c.wg.Done()
 
@@ -170,47 +197,10 @@ func (c *MQTTClient) connectionMonitor() {
 
 			if !connected {
 				log.Printf("MQTT connection lost, attempting to reconnect...")
+				go c.reconnect()
 			}
 		}
 	}
-}
-
-func (c *MQTTClient) Subscribe(topic string, qos byte) error {
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-	defer cancel()
-
-	lockAcquired := make(chan struct{})
-	go func() {
-		c.mu.Lock()
-		close(lockAcquired)
-	}()
-
-	select {
-	case <-lockAcquired:
-		defer c.mu.Unlock()
-	case <-ctx.Done():
-		return fmt.Errorf("timed out waiting for lock while subscribing to %s", topic)
-	}
-
-	c.subscriptions[topic] = paho.SubscribeOptions{
-		Topic: topic,
-		QoS:   qos,
-	}
-
-	if c.connected && c.cm != nil {
-		_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
-			Subscriptions: []paho.SubscribeOptions{
-				{Topic: topic, QoS: qos},
-			},
-		})
-		if err != nil {
-			delete(c.subscriptions, topic)
-			return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
-		}
-		log.Printf("Active subscriptions: %d", len(c.subscriptions))
-	}
-
-	return nil
 }
 
 func (c *MQTTClient) resubscribe() error {

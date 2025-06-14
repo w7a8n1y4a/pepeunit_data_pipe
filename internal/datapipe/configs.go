@@ -136,21 +136,18 @@ func NewMessageBuffer(mqtt *mqtt_client.MQTTClient) *MessageBuffer {
 		messages: make(map[string]struct{}),
 		done:     make(chan struct{}),
 		mqtt:     mqtt,
-		maxSize:  100,
+		maxSize:  1000,
 	}
 
 	log.Printf("Creating new message buffer with ticker")
 	// Start ticker in a separate goroutine
 	b.ticker = time.NewTicker(5 * time.Second)
 	go func() {
-		log.Printf("Ticker goroutine started")
 		for {
 			select {
 			case <-b.ticker.C:
-				log.Printf("Ticker tick received")
 				b.mu.Lock()
 				if len(b.messages) > 0 {
-					log.Printf("Ticker triggered, processing %d messages", len(b.messages))
 					// Создаем копию сообщений для обработки
 					topics := make(map[string]byte, len(b.messages))
 					for t := range b.messages {
@@ -168,11 +165,9 @@ func NewMessageBuffer(mqtt *mqtt_client.MQTTClient) *MessageBuffer {
 					}
 					log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
 				} else {
-					log.Printf("Ticker triggered but buffer is empty")
 					b.mu.Unlock()
 				}
 			case <-b.done:
-				log.Printf("Ticker goroutine received done signal")
 				return
 			}
 		}
@@ -192,11 +187,9 @@ func (b *MessageBuffer) Add(topic string) {
 
 	b.messages[topic] = struct{}{}
 	currentSize := len(b.messages)
-	log.Printf("Added topic to buffer. Current size: %d/%d", currentSize, b.maxSize)
 
 	// Если достигли максимального размера, сбрасываем буфер немедленно
 	if currentSize >= b.maxSize {
-		log.Printf("Buffer reached max size (%d), flushing immediately", b.maxSize)
 		// Создаем копию сообщений для обработки
 		topics := make(map[string]byte, len(b.messages))
 		for t := range b.messages {
@@ -313,7 +306,6 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 				}
 
 				if len(messages) > 0 {
-					log.Printf("Received %d messages from Redis stream", len(messages))
 					for _, msg := range messages {
 						lastID = msg.ID
 
@@ -344,7 +336,6 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 							if unitNode.DataPipeYML != nil {
 								c.Set(unitNode.UUID, *unitNode.DataPipeYML)
 								topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
-								log.Printf("Adding topic to buffer: %s", topic)
 								msgBuffer.Add(topic)
 							}
 						case "Delete":
