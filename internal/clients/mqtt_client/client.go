@@ -86,8 +86,8 @@ func (c *MQTTClient) Connect() error {
 		cliCfg := autopaho.ClientConfig{
 			ServerUrls:                    []*url.URL{serverURL},
 			KeepAlive:                     uint16(c.cfg.MQTT_KEEPALIVE),
-			CleanStartOnInitialConnection: false,
-			SessionExpiryInterval:         86400,
+			CleanStartOnInitialConnection: true,
+			SessionExpiryInterval:         0,
 			OnConnectionUp: func(cm *autopaho.ConnectionManager, connAck *paho.Connack) {
 				c.mu.Lock()
 				wasConnected := c.connected
