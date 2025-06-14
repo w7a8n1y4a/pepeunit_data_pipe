@@ -311,3 +311,50 @@ func (c *MQTTClient) GetSubscriptionCount() int {
 	defer c.mu.RUnlock()
 	return len(c.subscriptions)
 }
+
+func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		c.mu.Lock()
+		close(lockAcquired)
+	}()
+
+	select {
+	case <-lockAcquired:
+		defer c.mu.Unlock()
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for lock while subscribing to multiple topics")
+	}
+
+	// Add to local subscriptions map
+	for topic, qos := range filters {
+		c.subscriptions[topic] = paho.SubscribeOptions{
+			Topic: topic,
+			QoS:   qos,
+		}
+	}
+
+	if c.connected && c.cm != nil {
+		// Create subscribe packet
+		subscribe := &paho.Subscribe{
+			Subscriptions: make([]paho.SubscribeOptions, 0, len(filters)),
+		}
+
+		for topic, qos := range filters {
+			subscribe.Subscriptions = append(subscribe.Subscriptions, paho.SubscribeOptions{
+				Topic: topic,
+				QoS:   qos,
+			})
+		}
+
+		// Send subscribe request
+		if _, err := c.cm.Subscribe(ctx, subscribe); err != nil {
+			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
+		}
+	}
+
+	return nil
+}

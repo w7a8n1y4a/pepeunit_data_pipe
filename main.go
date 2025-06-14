@@ -84,15 +84,20 @@ func main() {
 	}
 	log.Printf("Success get %d unit nodes with active pipe", len(activeNodes))
 
+	// Create a map of topics to subscribe to
+	topics := make(map[string]byte)
 	for _, node := range activeNodes {
 		if node.DataPipeYML != nil {
 			fullTopicName := fmt.Sprintf("%s/%s", cfg.BACKEND_DOMAIN, node.UUID)
-
-			if err := mqttClient.Subscribe(fullTopicName, 0); err != nil {
-				continue
-			}
+			topics[fullTopicName] = 0
 		}
 	}
+
+	// Subscribe to all topics at once
+	if err := mqttClient.SubscribeMultiple(topics); err != nil {
+		log.Printf("Failed to subscribe to topics: %v", err)
+	}
+
 	log.Printf("Active subs: %d", mqttClient.GetSubscriptionCount())
 
 	// Wait for interrupt signal

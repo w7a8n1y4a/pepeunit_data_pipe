@@ -120,6 +120,120 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 	return nil
 }
 
+// MessageBuffer holds messages for batch processing
+type MessageBuffer struct {
+	mu       sync.Mutex
+	messages map[string]struct{} // map[topic]struct{}
+	ticker   *time.Ticker
+	done     chan struct{}
+	closed   bool
+	mqtt     *mqtt_client.MQTTClient
+	maxSize  int
+}
+
+func NewMessageBuffer(mqtt *mqtt_client.MQTTClient) *MessageBuffer {
+	b := &MessageBuffer{
+		messages: make(map[string]struct{}),
+		done:     make(chan struct{}),
+		mqtt:     mqtt,
+		maxSize:  100,
+	}
+
+	log.Printf("Creating new message buffer with ticker")
+	// Start ticker in a separate goroutine
+	b.ticker = time.NewTicker(5 * time.Second)
+	go func() {
+		log.Printf("Ticker goroutine started")
+		for {
+			select {
+			case <-b.ticker.C:
+				log.Printf("Ticker tick received")
+				b.mu.Lock()
+				if len(b.messages) > 0 {
+					log.Printf("Ticker triggered, processing %d messages", len(b.messages))
+					// Создаем копию сообщений для обработки
+					topics := make(map[string]byte, len(b.messages))
+					for t := range b.messages {
+						topics[t] = 0
+					}
+					// Очищаем буфер
+					b.messages = make(map[string]struct{})
+					b.mu.Unlock()
+
+					// Подписываемся на топики
+					if err := b.mqtt.SubscribeMultiple(topics); err != nil {
+						log.Printf("Failed to subscribe to topics: %v", err)
+					} else {
+						log.Printf("Successfully subscribed to %d topics", len(topics))
+					}
+					log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
+				} else {
+					log.Printf("Ticker triggered but buffer is empty")
+					b.mu.Unlock()
+				}
+			case <-b.done:
+				log.Printf("Ticker goroutine received done signal")
+				return
+			}
+		}
+	}()
+
+	return b
+}
+
+func (b *MessageBuffer) Add(topic string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.closed {
+		log.Printf("Buffer is closed, ignoring topic: %s", topic)
+		return
+	}
+
+	b.messages[topic] = struct{}{}
+	currentSize := len(b.messages)
+	log.Printf("Added topic to buffer. Current size: %d/%d", currentSize, b.maxSize)
+
+	// Если достигли максимального размера, сбрасываем буфер немедленно
+	if currentSize >= b.maxSize {
+		log.Printf("Buffer reached max size (%d), flushing immediately", b.maxSize)
+		// Создаем копию сообщений для обработки
+		topics := make(map[string]byte, len(b.messages))
+		for t := range b.messages {
+			topics[t] = 0
+		}
+		// Очищаем буфер
+		b.messages = make(map[string]struct{})
+		// Разблокируем мьютекс перед вызовом SubscribeMultiple
+		b.mu.Unlock()
+		// Подписываемся на топики
+		if err := b.mqtt.SubscribeMultiple(topics); err != nil {
+			log.Printf("Failed to subscribe to topics: %v", err)
+		} else {
+			log.Printf("Successfully subscribed to %d topics", len(topics))
+		}
+		log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
+		// Блокируем мьютекс обратно
+		b.mu.Lock()
+	}
+}
+
+func (b *MessageBuffer) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.closed {
+		return
+	}
+
+	log.Printf("Closing message buffer")
+	b.closed = true
+	if b.ticker != nil {
+		b.ticker.Stop()
+	}
+	close(b.done)
+}
+
 // StartConfigSync starts background processes for configuration synchronization
 func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *database.PostgresDB, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
 	// Start periodic sync from PostgreSQL
@@ -144,45 +258,47 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 						continue
 					}
 
-					// Create a map of existing subscriptions
-					existingSubscriptions := make(map[string]struct{})
-					subscribedCount := 0
+					// Create a map of topics to subscribe to
+					topics := make(map[string]byte)
 					for _, node := range nodes {
 						if node.DataPipeYML != nil {
 							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
-							existingSubscriptions[topic] = struct{}{}
-
-							// Subscribe to new topics
-							if err := mqttClient.Subscribe(topic, 0); err != nil {
-								log.Printf("Failed to subscribe to topic %s: %v", topic, err)
-							} else {
-								subscribedCount++
-							}
+							topics[topic] = 0
 						}
 					}
 
-					// Get current subscriptions and unsubscribe from inactive ones
-					currentSubscriptions := mqttClient.GetSubscriptions()
-					unsubscribedCount := 0
-					for topic := range currentSubscriptions {
-						if _, exists := existingSubscriptions[topic]; !exists {
-							if err := mqttClient.Unsubscribe(topic); err != nil {
-								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
-							} else {
-								unsubscribedCount++
-							}
-						}
+					// Subscribe to all topics at once
+					if err := mqttClient.SubscribeMultiple(topics); err != nil {
+						log.Printf("Failed to subscribe to topics: %v", err)
+					} else {
+						log.Printf("Successfully subscribed to %d topics", len(topics))
 					}
-					log.Printf("MQTT subscriptions updated: +%d -%d", subscribedCount, unsubscribedCount)
 				}
 			}
 		}
 	}()
 
+	// Create message buffer for Redis updates
+	msgBuffer := NewMessageBuffer(mqttClient)
+
 	// Start Redis stream processing
 	go func() {
 		lastID := "$" // Start from the latest message
 		log.Printf("Starting Redis stream processing")
+
+		// Start message processor
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					log.Printf("Context done, closing message buffer")
+					msgBuffer.Close()
+					return
+				case <-msgBuffer.done:
+					return
+				}
+			}
+		}()
 
 		for {
 			select {
@@ -228,9 +344,8 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 							if unitNode.DataPipeYML != nil {
 								c.Set(unitNode.UUID, *unitNode.DataPipeYML)
 								topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
-								if err := mqttClient.Subscribe(topic, 0); err != nil {
-									log.Printf("Failed to subscribe to topic %s: %v", topic, err)
-								}
+								log.Printf("Adding topic to buffer: %s", topic)
+								msgBuffer.Add(topic)
 							}
 						case "Delete":
 							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)

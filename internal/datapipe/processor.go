@@ -95,7 +95,6 @@ func (p *Processor) getNodeState(nodeUUID string) *NodeState {
 
 // ProcessMessage processes a message from a topic
 func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []byte) error {
-	fmt.Println(topic, payload)
 	// Extract node UUID from topic
 	nodeUUID := extractNodeUUID(topic)
 	if nodeUUID == "" {
