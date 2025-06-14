@@ -129,20 +129,22 @@ type MessageBuffer struct {
 	closed   bool
 	mqtt     *mqtt_client.MQTTClient
 	maxSize  int
+	cfg      *config.Config
 }
 
-func NewMessageBuffer(mqtt *mqtt_client.MQTTClient) *MessageBuffer {
+func NewMessageBuffer(mqtt *mqtt_client.MQTTClient, cfg *config.Config) *MessageBuffer {
 	b := &MessageBuffer{
 		messages: make(map[string]struct{}),
 		done:     make(chan struct{}),
 		mqtt:     mqtt,
-		maxSize:  1000,
+		maxSize:  cfg.BUFFER_MAX_SIZE,
+		cfg:      cfg,
 	}
 
-	log.Printf("Creating new message buffer with ticker")
 	// Start ticker in a separate goroutine
-	b.ticker = time.NewTicker(5 * time.Second)
+	b.ticker = time.NewTicker(time.Duration(b.cfg.BUFFER_FLUSH_INTERVAL) * time.Second)
 	go func() {
+		log.Printf("Success Ticker goroutine started")
 		for {
 			select {
 			case <-b.ticker.C:
@@ -234,7 +236,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 		ticker := time.NewTicker(time.Duration(c.cfg.CONFIG_SYNC_INTERVAL) * time.Second)
 		defer ticker.Stop()
 
-		log.Printf("Starting PostgreSQL periodic configuration sync (every %d seconds)", c.cfg.CONFIG_SYNC_INTERVAL)
+		log.Println("Success PostgreSQL periodic gorutine start")
 
 		for {
 			select {
@@ -272,12 +274,12 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 	}()
 
 	// Create message buffer for Redis updates
-	msgBuffer := NewMessageBuffer(mqttClient)
+	msgBuffer := NewMessageBuffer(mqttClient, c.cfg)
 
 	// Start Redis stream processing
 	go func() {
 		lastID := "$" // Start from the latest message
-		log.Printf("Starting Redis stream processing")
+		log.Printf("Success starting Redis stream processing")
 
 		// Start message processor
 		go func() {
