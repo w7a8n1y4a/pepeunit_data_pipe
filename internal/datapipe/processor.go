@@ -116,7 +116,6 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 	nodeState := p.getNodeState(nodeUUID)
 	shouldProcess := filters.ApplyFilters(string(payload), config.Filters, nodeState.LastMessageTime, nodeState.LastValue)
 	if !shouldProcess {
-		log.Printf("Message from node %s filtered out", nodeUUID)
 		return nil
 	}
 
@@ -159,7 +158,7 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 func extractNodeUUID(topic string) string {
 	// Topic format: backend_domain/node_uuid
 	parts := strings.Split(topic, "/")
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		return ""
 	}
 	return parts[1]

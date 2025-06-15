@@ -170,7 +170,7 @@ func (c *MQTTClient) Connect() error {
 
 // subscribe subscribes to the single topic BACKEND_DOMAIN/+
 func (c *MQTTClient) subscribe() error {
-	topic := fmt.Sprintf("%s/+", c.cfg.BACKEND_DOMAIN)
+	topic := fmt.Sprintf("%s/+/pepeunit", c.cfg.BACKEND_DOMAIN)
 
 	_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
 		Subscriptions: []paho.SubscribeOptions{
