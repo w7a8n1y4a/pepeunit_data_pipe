@@ -3,7 +3,6 @@ package mqtt_client
 import (
 	"fmt"
 	"log"
-	"sync"
 	"time"
 )
 
@@ -25,7 +24,6 @@ const (
 type SubscriptionBuffer struct {
 	client        *MQTTClient
 	subscriptions map[string]SubscriptionStatus
-	mu            sync.RWMutex
 	flushChan     chan struct{}
 	flushInterval time.Duration
 	currentTopics []string
@@ -118,93 +116,4 @@ func (b *SubscriptionBuffer) UpdateFromDatabase() error {
 	}
 
 	return nil
-}
-
-// Flush applies all pending subscription changes
-func (b *SubscriptionBuffer) Flush() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	// Get current subscriptions
-	currentTopics := b.client.GetSubscribedTopics()
-
-	// Create a set of current topics for efficient lookup
-	currentSet := make(map[string]struct{})
-	for _, topic := range currentTopics {
-		currentSet[topic] = struct{}{}
-	}
-
-	// Process each subscription
-	toSubscribe := make(map[string]byte)
-	toUnsubscribe := make([]string, 0)
-
-	for topic, status := range b.subscriptions {
-		switch status {
-		case StatusPending:
-			// Subscribe if not already subscribed
-			if _, exists := currentSet[topic]; !exists {
-				toSubscribe[topic] = 0
-			}
-			b.subscriptions[topic] = StatusSubscribed
-
-		case StatusUnsubscribe:
-			// Unsubscribe if currently subscribed
-			if _, exists := currentSet[topic]; exists {
-				toUnsubscribe = append(toUnsubscribe, topic)
-			}
-			delete(b.subscriptions, topic)
-		}
-	}
-
-	// Process unsubscriptions first
-	if len(toUnsubscribe) > 0 {
-		if err := b.client.UnsubscribeMultiple(toUnsubscribe); err != nil {
-			log.Printf("Failed to unsubscribe from topics: %v", err)
-			return
-		}
-	}
-
-	// Process new subscriptions
-	if len(toSubscribe) > 0 {
-		if err := b.client.SubscribeMultipleWithCallback(toSubscribe, func(topic string, err error) {
-			if err != nil {
-				log.Printf("Failed to subscribe to topic %s: %v", topic, err)
-			} else {
-				log.Printf("Successfully subscribed to topic %s", topic)
-			}
-		}); err != nil {
-			log.Printf("Failed to subscribe to topics: %v", err)
-			return
-		}
-	}
-}
-
-// flushLoop periodically flushes the subscription buffer
-func (b *SubscriptionBuffer) flushLoop() {
-	ticker := time.NewTicker(b.flushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-b.flushChan:
-			return
-		case <-ticker.C:
-			b.Flush()
-		}
-	}
-}
-
-// Start starts the subscription buffer
-func (b *SubscriptionBuffer) Start() {
-	go b.flushLoop()
-}
-
-// Stop stops the subscription buffer
-func (b *SubscriptionBuffer) Stop() {
-	close(b.flushChan)
-}
-
-// Close closes the subscription buffer
-func (b *SubscriptionBuffer) Close() {
-	b.Stop()
 }

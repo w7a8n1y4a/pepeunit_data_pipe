@@ -18,12 +18,9 @@ import (
 
 // DataPipeConfigs stores and manages DataPipe configurations for nodes
 type DataPipeConfigs struct {
-	mu       sync.RWMutex
-	configs  map[string]string // map[node.UUID]node.DataPipeYML
-	postgres *database.PostgresDB
-	redis    *redis.Client
-	mqtt     MQTTClient
-	cfg      *config.Config
+	mu      sync.RWMutex
+	configs map[string]string // map[node.UUID]node.DataPipeYML
+	cfg     *config.Config
 }
 
 // NewDataPipeConfigs creates a new DataPipeConfigs instance
@@ -32,34 +29,6 @@ func NewDataPipeConfigs(cfg *config.Config) *DataPipeConfigs {
 		configs: make(map[string]string),
 		cfg:     cfg,
 	}
-}
-
-// SetPostgres sets the PostgreSQL database connection
-func (c *DataPipeConfigs) SetPostgres(db *database.PostgresDB) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.postgres = db
-}
-
-// SetRedis sets the Redis client
-func (c *DataPipeConfigs) SetRedis(client *redis.Client) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.redis = client
-}
-
-// SetMQTT sets the MQTT client
-func (c *DataPipeConfigs) SetMQTT(client MQTTClient) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.mqtt = client
-}
-
-// Set adds or updates a node's configuration
-func (c *DataPipeConfigs) Set(nodeUUID, config string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.configs[nodeUUID] = config
 }
 
 // Get retrieves a node's configuration
@@ -76,13 +45,6 @@ func (c *DataPipeConfigs) Get(nodeUUID string) (types.DataPipeConfig, bool) {
 		return types.DataPipeConfig{}, false
 	}
 	return config, true
-}
-
-// Remove removes a node's configuration
-func (c *DataPipeConfigs) Remove(nodeUUID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.configs, nodeUUID)
 }
 
 // LoadNodeConfigs loads active node configurations from PostgreSQL
@@ -120,103 +82,6 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 	return nil
 }
 
-// MessageBuffer holds messages for batch processing
-type MessageBuffer struct {
-	mu       sync.Mutex
-	messages map[string]struct{} // map[topic]struct{}
-	ticker   *time.Ticker
-	done     chan struct{}
-	closed   bool
-	mqtt     *mqtt_client.MQTTClient
-	maxSize  int
-	cfg      *config.Config
-}
-
-func NewMessageBuffer(mqtt *mqtt_client.MQTTClient, cfg *config.Config) *MessageBuffer {
-	b := &MessageBuffer{
-		messages: make(map[string]struct{}),
-		done:     make(chan struct{}),
-		mqtt:     mqtt,
-		maxSize:  cfg.BUFFER_MAX_SIZE,
-		cfg:      cfg,
-	}
-
-	// Start ticker in a separate goroutine
-	b.ticker = time.NewTicker(time.Duration(b.cfg.BUFFER_FLUSH_INTERVAL) * time.Second)
-	go func() {
-		log.Printf("Success Ticker goroutine started")
-		for {
-			select {
-			case <-b.ticker.C:
-				b.mu.Lock()
-				if len(b.messages) > 0 {
-					// Create list of topics for subscription
-					topics := make([]string, 0, len(b.messages))
-					for t := range b.messages {
-						topics = append(topics, t)
-					}
-					// Clear the buffer
-					b.messages = make(map[string]struct{})
-					b.mu.Unlock()
-
-					log.Println("Run update subs by redis buffer timer")
-					b.mqtt.GetSubscriptionBuffer().UpdateFromDatabase()
-				} else {
-					b.mu.Unlock()
-				}
-			case <-b.done:
-				return
-			}
-		}
-	}()
-
-	return b
-}
-
-func (b *MessageBuffer) Add(topic string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.closed {
-		log.Printf("Buffer is closed, ignoring topic: %s", topic)
-		return
-	}
-
-	b.messages[topic] = struct{}{}
-	currentSize := len(b.messages)
-
-	// If we've reached max size, flush immediately
-	if currentSize >= b.maxSize {
-		// Create list of topics for subscription
-		topics := make([]string, 0, len(b.messages))
-		for t := range b.messages {
-			topics = append(topics, t)
-		}
-		// Clear the buffer
-		b.messages = make(map[string]struct{})
-		b.mu.Unlock()
-
-		log.Println("Run update subs by redis buffer size")
-		b.mqtt.GetSubscriptionBuffer().UpdateFromDatabase()
-	}
-}
-
-func (b *MessageBuffer) Close() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.closed {
-		return
-	}
-
-	log.Printf("Closing message buffer")
-	b.closed = true
-	if b.ticker != nil {
-		b.ticker.Stop()
-	}
-	close(b.done)
-}
-
 // StartConfigSync starts background processes for configuration synchronization
 func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *database.PostgresDB, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
 	// Start periodic sync
@@ -248,10 +113,23 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 		lastID := "$" // Start from the latest message
 		log.Printf("Success starting Redis stream processing")
 
+		// Create a buffer for topics
+		topicBuffer := make(map[string]struct{})
+		bufferSize := 0
+		flushTicker := time.NewTicker(time.Duration(c.cfg.BUFFER_FLUSH_INTERVAL) * time.Second)
+		defer flushTicker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-flushTicker.C:
+				if len(topicBuffer) > 0 {
+					log.Printf("Flushing buffer with %d topics due to interval", len(topicBuffer))
+					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+					topicBuffer = make(map[string]struct{})
+					bufferSize = 0
+				}
 			default:
 				messages, err := redisDB.ReadStream(ctx, "backend_data_pipe_nodes", lastID)
 				if err != nil {
@@ -265,33 +143,24 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 					continue
 				}
 
-				// Собираем все топики из сообщений
-				var allTopics []string
+				// Process messages and add topics to buffer
 				for _, message := range messages {
 					lastID = message.ID
 					values := message.Values
 					if topic, ok := values["topic"].(string); ok {
-						allTopics = append(allTopics, topic)
+						topicBuffer[topic] = struct{}{}
+						bufferSize++
+
+						// If buffer reaches max size, flush it
+						if bufferSize >= c.cfg.BUFFER_MAX_SIZE {
+							log.Printf("Flushing buffer with %d topics due to size limit", bufferSize)
+							mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+							topicBuffer = make(map[string]struct{})
+							bufferSize = 0
+						}
 					}
 				}
 
-				// Обновляем подписки одним пакетом
-				if len(allTopics) > 0 {
-					log.Printf("Updating subscriptions for %d topics from Redis", len(allTopics))
-					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
-				}
-
-				// Подтверждаем обработку всех сообщений
-				for _, message := range messages {
-					// Добавляем сообщение в поток подтверждений
-					_, err := redisDB.AddToStream(ctx, "backend_data_pipe_nodes_ack", map[string]interface{}{
-						"original_id": message.ID,
-						"status":      "processed",
-					})
-					if err != nil {
-						log.Printf("Error acknowledging message %s: %v", message.ID, err)
-					}
-				}
 			}
 		}
 	}()

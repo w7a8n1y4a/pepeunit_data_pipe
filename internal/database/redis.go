@@ -67,38 +67,3 @@ func (db *RedisDB) ReadStream(ctx context.Context, streamName string, lastID str
 
 	return streams[0].Messages, nil
 }
-
-// AddToStream adds a message to a Redis stream
-func (db *RedisDB) AddToStream(ctx context.Context, streamName string, values map[string]interface{}) (string, error) {
-	id, err := db.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: streamName,
-		Values: values,
-	}).Result()
-
-	if err != nil {
-		return "", fmt.Errorf("failed to add message to Redis stream: %w", err)
-	}
-
-	return id, nil
-}
-
-// GetStreamLength returns the number of messages in a stream
-func (db *RedisDB) GetStreamLength(ctx context.Context, streamName string) (int64, error) {
-	length, err := db.client.XLen(ctx, streamName).Result()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get stream length: %w", err)
-	}
-	return length, nil
-}
-
-// GetLastMessageID returns the ID of the last message in a stream
-func (db *RedisDB) GetLastMessageID(ctx context.Context, streamName string) (string, error) {
-	messages, err := db.client.XRevRange(ctx, streamName, "+", "-").Result()
-	if err != nil {
-		return "", fmt.Errorf("failed to get last message ID: %w", err)
-	}
-	if len(messages) == 0 {
-		return "0", nil
-	}
-	return messages[0].ID, nil
-}

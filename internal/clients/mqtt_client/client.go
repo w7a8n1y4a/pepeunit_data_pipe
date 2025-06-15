@@ -403,18 +403,6 @@ func (c *MQTTClient) UnsubscribeMultiple(topics []string) error {
 	return nil
 }
 
-// Close closes the MQTT client
-func (c *MQTTClient) Close() {
-	if c.subscriptionBuffer != nil {
-		c.subscriptionBuffer.Close()
-	}
-	c.cancel()
-	if c.cm != nil {
-		_ = c.cm.Disconnect(context.Background())
-	}
-	c.wg.Wait()
-}
-
 // SubscribeMultipleWithCallback subscribes to multiple topics with a callback
 func (c *MQTTClient) SubscribeMultipleWithCallback(filters map[string]byte, callback func(topic string, err error)) error {
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
@@ -493,25 +481,6 @@ func (c *MQTTClient) GetActiveTopics(ctx context.Context) ([]string, error) {
 	}
 
 	return topics, nil
-}
-
-// Subscribe subscribes to a single topic
-func (c *MQTTClient) Subscribe(topic string) error {
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-	defer cancel()
-
-	_, err := c.cm.Subscribe(ctx, &paho.Subscribe{
-		Subscriptions: []paho.SubscribeOptions{
-			{
-				Topic: topic,
-				QoS:   0,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
-	}
-	return nil
 }
 
 // GetSubscriptionBuffer returns the subscription buffer
