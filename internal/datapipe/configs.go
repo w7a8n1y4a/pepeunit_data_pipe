@@ -159,7 +159,6 @@ func NewMessageBuffer(mqtt *mqtt_client.MQTTClient, cfg *config.Config) *Message
 					b.messages = make(map[string]struct{})
 					b.mu.Unlock()
 
-					// Update subscriptions using UpdateFromDatabase
 					log.Println("Run update subs by redis buffer timer")
 					b.mqtt.GetSubscriptionBuffer().UpdateFromDatabase()
 				} else {
@@ -195,9 +194,8 @@ func (b *MessageBuffer) Add(topic string) {
 		}
 		// Clear the buffer
 		b.messages = make(map[string]struct{})
-		// Unlock before calling UpdateFromDatabase
 		b.mu.Unlock()
-		// Update subscriptions using UpdateFromDatabase
+
 		log.Println("Run update subs by redis buffer size")
 		b.mqtt.GetSubscriptionBuffer().UpdateFromDatabase()
 	}
@@ -221,7 +219,7 @@ func (b *MessageBuffer) Close() {
 
 // StartConfigSync starts background processes for configuration synchronization
 func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *database.PostgresDB, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
-	// Start periodic sync from PostgreSQL
+	// Start periodic sync
 	go func() {
 		ticker := time.NewTicker(time.Duration(c.cfg.CONFIG_SYNC_INTERVAL) * time.Second)
 		defer ticker.Stop()
@@ -234,7 +232,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 				return
 			case <-ticker.C:
 				if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
-					log.Printf("Failed to sync configurations from PostgreSQL: %v", err)
+					log.Printf("Failed to sync configurations by Gorutine: %v", err)
 				} else {
 
 					// Update subscriptions using the buffer

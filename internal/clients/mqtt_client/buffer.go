@@ -42,7 +42,6 @@ func NewSubscriptionBuffer(client *MQTTClient) *SubscriptionBuffer {
 	}
 }
 
-// UpdateFromDatabase updates the subscription status based on active nodes
 func (b *SubscriptionBuffer) UpdateFromDatabase() error {
 	// Get active topics from database
 	activeTopics, err := b.client.GetActiveTopics(b.client.ctx)
