@@ -94,6 +94,7 @@ func main() {
 	}
 
 	// Subscribe to all topics using the buffer
+	log.Printf("Send %d topics to subs buffer - at start app", len(topics))
 	mqttClient.SubscriptionBuffer.UpdateFromDatabase(topics)
 
 	// Wait for interrupt signal

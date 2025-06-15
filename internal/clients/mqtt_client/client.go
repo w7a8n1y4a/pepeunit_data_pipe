@@ -33,7 +33,8 @@ type MQTTClient struct {
 	router             *paho.StandardRouter
 	subscriptions      map[string]paho.SubscribeOptions
 	messageHandler     func(topic string, payload []byte)
-	mu                 sync.RWMutex
+	subMu              sync.RWMutex // Mutex for subscriptions
+	connMu             sync.RWMutex // Mutex for connection state
 	ctx                context.Context
 	cancel             context.CancelFunc
 	wg                 sync.WaitGroup
@@ -95,24 +96,24 @@ func (c *MQTTClient) Connect() error {
 			CleanStartOnInitialConnection: true,
 			SessionExpiryInterval:         0,
 			OnConnectionUp: func(cm *autopaho.ConnectionManager, connAck *paho.Connack) {
-				c.mu.Lock()
+				c.connMu.Lock()
 				wasConnected := c.connected
 				c.connected = true
-				c.mu.Unlock()
+				c.connMu.Unlock()
 
-				if !wasConnected {
+				if wasConnected {
 					log.Println("Re sub")
 					if err := c.resubscribe(); err != nil {
 						log.Printf("Failed to resubscribe: %v", err)
 					}
-					log.Printf("Success connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
 				}
+				log.Printf("Success connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
 			},
 			OnConnectError: func(err error) {
 				log.Printf("MQTT connection error: %v", err)
-				c.mu.Lock()
+				c.connMu.Lock()
 				c.connected = false
-				c.mu.Unlock()
+				c.connMu.Unlock()
 				// Try to reconnect
 				go c.reconnect()
 			},
@@ -121,16 +122,16 @@ func (c *MQTTClient) Connect() error {
 				Router:   c.router,
 				OnClientError: func(err error) {
 					log.Printf("MQTT client error: %v", err)
-					c.mu.Lock()
+					c.connMu.Lock()
 					c.connected = false
-					c.mu.Unlock()
+					c.connMu.Unlock()
 					// Try to reconnect
 					go c.reconnect()
 				},
 				OnServerDisconnect: func(disconnect *paho.Disconnect) {
-					c.mu.Lock()
+					c.connMu.Lock()
 					c.connected = false
-					c.mu.Unlock()
+					c.connMu.Unlock()
 					log.Printf("MQTT server disconnected: %v", disconnect)
 					// Try to reconnect
 					go c.reconnect()
@@ -174,12 +175,12 @@ func (c *MQTTClient) reconnect() {
 	// Add a small delay to prevent rapid reconnection attempts
 	time.Sleep(time.Second)
 
-	c.mu.Lock()
+	c.connMu.Lock()
 	if c.connected {
-		c.mu.Unlock()
+		c.connMu.Unlock()
 		return
 	}
-	c.mu.Unlock()
+	c.connMu.Unlock()
 
 	log.Printf("Attempting to reconnect to MQTT broker...")
 	if err := c.Connect(); err != nil {
@@ -198,9 +199,9 @@ func (c *MQTTClient) connectionMonitor() {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
-			c.mu.RLock()
+			c.connMu.RLock()
 			connected := c.connected
-			c.mu.RUnlock()
+			c.connMu.RUnlock()
 
 			if !connected {
 				log.Printf("MQTT connection lost, attempting to reconnect...")
@@ -211,8 +212,8 @@ func (c *MQTTClient) connectionMonitor() {
 }
 
 func (c *MQTTClient) resubscribe() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
 
 	if len(c.subscriptions) == 0 {
 		return nil
@@ -245,29 +246,24 @@ func (c *MQTTClient) Unsubscribe(topic string) error {
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
 
-	lockAcquired := make(chan struct{})
-	go func() {
-		c.mu.Lock()
-		close(lockAcquired)
-	}()
-
-	select {
-	case <-lockAcquired:
-		defer c.mu.Unlock()
-	case <-ctx.Done():
-		return fmt.Errorf("timed out waiting for lock while unsubscribing from %s", topic)
-	}
-
+	// Remove from local subscriptions map
+	c.subMu.Lock()
 	delete(c.subscriptions, topic)
+	c.subMu.Unlock()
 
-	if c.connected && c.cm != nil {
-		_, err := c.cm.Unsubscribe(c.ctx, &paho.Unsubscribe{
+	c.connMu.RLock()
+	connected := c.connected
+	cm := c.cm
+	c.connMu.RUnlock()
+
+	if connected && cm != nil {
+		_, err := cm.Unsubscribe(ctx, &paho.Unsubscribe{
 			Topics: []string{topic},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to unsubscribe from topic %s: %w", topic, err)
 		}
-		log.Printf("Active subscriptions: %d", len(c.subscriptions))
+		log.Printf("Active subscriptions: %d", c.GetSubscriptionCount())
 	}
 
 	return nil
@@ -291,8 +287,8 @@ func generateToken(cfg *config.Config) (string, error) {
 
 // GetSubscriptionCount returns the number of current subscriptions
 func (c *MQTTClient) GetSubscriptionCount() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
 	return len(c.subscriptions)
 }
 
@@ -302,13 +298,13 @@ func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
 
 	lockAcquired := make(chan struct{})
 	go func() {
-		c.mu.Lock()
+		c.subMu.Lock()
 		close(lockAcquired)
 	}()
 
 	select {
 	case <-lockAcquired:
-		defer c.mu.Unlock()
+		defer c.subMu.Unlock()
 	case <-ctx.Done():
 		return fmt.Errorf("timed out waiting for lock while subscribing to multiple topics")
 	}
@@ -334,11 +330,13 @@ func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
 			})
 		}
 
-		log.Println("Test multi subs")
+		// log.Printf("Send subscribe query over MQTT for %d topics", len(filters))
+
 		// Send subscribe request
 		if _, err := c.cm.Subscribe(ctx, subscribe); err != nil {
 			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
 		}
+		log.Printf("Active %d topic subsriptions", c.GetSubscriptionCount())
 	}
 
 	return nil
@@ -351,13 +349,13 @@ func (c *MQTTClient) UnsubscribeMultiple(topics []string) error {
 
 	lockAcquired := make(chan struct{})
 	go func() {
-		c.mu.Lock()
+		c.subMu.Lock()
 		close(lockAcquired)
 	}()
 
 	select {
 	case <-lockAcquired:
-		defer c.mu.Unlock()
+		defer c.subMu.Unlock()
 	case <-ctx.Done():
 		return fmt.Errorf("timed out waiting for lock while unsubscribing from multiple topics")
 	}

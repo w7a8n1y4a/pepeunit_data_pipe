@@ -161,7 +161,7 @@ func NewMessageBuffer(mqtt *mqtt_client.MQTTClient, cfg *config.Config) *Message
 
 					// Add topics to subscription buffer
 					b.mqtt.SubscriptionBuffer.BulkAdd(topics)
-					log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
+					log.Printf("Success send %d topics to subs buffer - at redis by time", len(topics))
 				} else {
 					b.mu.Unlock()
 				}
@@ -199,7 +199,8 @@ func (b *MessageBuffer) Add(topic string) {
 		b.mu.Unlock()
 		// Add topics to subscription buffer
 		b.mqtt.SubscriptionBuffer.BulkAdd(topics)
-		log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
+		log.Printf("Success send %d topics to subs buffer - at redis by size buffer", len(topics))
+
 		// Lock back
 		b.mu.Lock()
 	}
@@ -255,6 +256,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 					}
 
 					// Update subscriptions using the buffer
+					log.Printf("Send %d topics to subs buffer - at gorutine for Postgres", len(topics))
 					mqttClient.SubscriptionBuffer.UpdateFromDatabase(topics)
 				}
 			}

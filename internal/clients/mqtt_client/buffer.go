@@ -1,6 +1,7 @@
 package mqtt_client
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -50,22 +51,41 @@ func NewSubscriptionBuffer(client *MQTTClient, maxSize int, flushInterval time.D
 // BulkAdd adds multiple topics to the buffer
 func (b *SubscriptionBuffer) BulkAdd(topics []string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	for _, topic := range topics {
 		b.subscriptions[topic] = StatusPending
 	}
+	needFlush := len(b.subscriptions) >= b.maxSize
+	b.mu.Unlock()
 
-	if len(b.subscriptions) >= b.maxSize {
-		go b.Flush()
+	if needFlush {
+		// Create a context with timeout for the flush operation
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Create a channel to signal completion
+		done := make(chan struct{})
+
+		// Trigger flush to apply changes
+		go func() {
+			if err := b.Flush(); err != nil {
+				log.Printf("Failed to flush subscriptions: %v", err)
+			}
+			close(done)
+		}()
+
+		// Wait for flush to complete or timeout
+		select {
+		case <-done:
+			log.Printf("Successfully added %d topics to buffer", len(topics))
+		case <-ctx.Done():
+			log.Printf("Timeout waiting for subscription flush to complete")
+		}
 	}
 }
 
 // UpdateFromDatabase updates the subscription status based on active nodes
 func (b *SubscriptionBuffer) UpdateFromDatabase(activeTopics []string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	// Mark all current subscriptions for potential unsubscription
 	for topic := range b.subscriptions {
 		if b.subscriptions[topic] == StatusSubscribed {
@@ -77,16 +97,35 @@ func (b *SubscriptionBuffer) UpdateFromDatabase(activeTopics []string) {
 	for _, topic := range activeTopics {
 		b.subscriptions[topic] = StatusPending
 	}
+	b.mu.Unlock()
+
+	// Create a context with timeout for the flush operation
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Create a channel to signal completion
+	done := make(chan struct{})
 
 	// Trigger flush to apply changes
-	go b.Flush()
+	go func() {
+		if err := b.Flush(); err != nil {
+			log.Printf("Failed to flush subscriptions: %v", err)
+		}
+		close(done)
+	}()
+
+	// Wait for flush to complete or timeout
+	select {
+	case <-done:
+		log.Printf("Successfully updated subscriptions for %d topics", len(activeTopics))
+	case <-ctx.Done():
+		log.Printf("Timeout waiting for subscription flush to complete")
+	}
 }
 
 // Flush processes all pending subscriptions and unsubscriptions
 func (b *SubscriptionBuffer) Flush() error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	// Prepare subscriptions and unsubscriptions
 	toSubscribe := make(map[string]byte)
 	toUnsubscribe := make([]string, 0)
@@ -101,9 +140,11 @@ func (b *SubscriptionBuffer) Flush() error {
 			delete(b.subscriptions, topic)
 		}
 	}
+	b.mu.Unlock()
 
 	// Process unsubscriptions first
 	if len(toUnsubscribe) > 0 {
+		log.Printf("Unsubscribing from %d topics", len(toUnsubscribe))
 		if err := b.client.UnsubscribeMultiple(toUnsubscribe); err != nil {
 			log.Printf("Failed to unsubscribe from topics: %v", err)
 			return err
@@ -112,6 +153,7 @@ func (b *SubscriptionBuffer) Flush() error {
 
 	// Process new subscriptions
 	if len(toSubscribe) > 0 {
+		log.Printf("Subscribing to %d topics", len(toSubscribe))
 		if err := b.client.SubscribeMultiple(toSubscribe); err != nil {
 			log.Printf("Failed to subscribe to topics: %v", err)
 			return err
@@ -129,6 +171,10 @@ func (b *SubscriptionBuffer) flushLoop() {
 				log.Printf("Error during periodic subscription flush: %v", err)
 			}
 		case <-b.done:
+			// Perform one final flush before closing
+			if err := b.Flush(); err != nil {
+				log.Printf("Error during final subscription flush: %v", err)
+			}
 			return
 		}
 	}
