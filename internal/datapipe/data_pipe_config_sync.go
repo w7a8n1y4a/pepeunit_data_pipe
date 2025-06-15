@@ -101,7 +101,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 				} else {
 
 					// Update subscriptions using the buffer
-					log.Println("Run update subs by Gorutine")
+					log.Println("Run update subs by main timer")
 					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
 				}
 			}
@@ -111,25 +111,40 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 	// Start Redis stream processing
 	go func() {
 		lastID := "$" // Start from the latest message
-		log.Printf("Success starting Redis stream processing")
 
 		// Create a buffer for topics
-		topicBuffer := make(map[string]struct{})
+		topicBuffer := make([]string, 0)
 		bufferSize := 0
-		flushTicker := time.NewTicker(time.Duration(c.cfg.BUFFER_FLUSH_INTERVAL) * time.Second)
-		defer flushTicker.Stop()
+		stopCh := make(chan struct{})
+
+		// Start timer goroutine
+		go func() {
+			ticker := time.NewTicker(time.Duration(c.cfg.BUFFER_FLUSH_INTERVAL) * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					if bufferSize > 0 {
+						log.Printf("Run update subs by Redis buffer timer")
+						mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+						topicBuffer = make([]string, 0)
+						bufferSize = 0
+					}
+				case <-stopCh:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 
 		for {
 			select {
 			case <-ctx.Done():
+				close(stopCh)
+				log.Println("Redis stream processing goroutine received context cancellation")
 				return
-			case <-flushTicker.C:
-				if len(topicBuffer) > 0 {
-					log.Printf("Flushing buffer with %d topics due to interval", len(topicBuffer))
-					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
-					topicBuffer = make(map[string]struct{})
-					bufferSize = 0
-				}
 			default:
 				messages, err := redisDB.ReadStream(ctx, "backend_data_pipe_nodes", lastID)
 				if err != nil {
@@ -139,28 +154,33 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 					continue
 				}
 
-				if len(messages) == 0 {
-					continue
-				}
-
 				// Process messages and add topics to buffer
 				for _, message := range messages {
 					lastID = message.ID
 					values := message.Values
-					if topic, ok := values["topic"].(string); ok {
-						topicBuffer[topic] = struct{}{}
-						bufferSize++
 
-						// If buffer reaches max size, flush it
-						if bufferSize >= c.cfg.BUFFER_MAX_SIZE {
-							log.Printf("Flushing buffer with %d topics due to size limit", bufferSize)
-							mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
-							topicBuffer = make(map[string]struct{})
-							bufferSize = 0
+					if unitNodeData, ok := values["unit_node_data"].(string); ok {
+						var nodeData map[string]interface{}
+						if err := json.Unmarshal([]byte(unitNodeData), &nodeData); err != nil {
+							log.Printf("Error parsing unit_node_data JSON: %v", err)
+							continue
+						}
+
+						if topic, ok := nodeData["topic_name"].(string); ok {
+							// Add topic to buffer
+							topicBuffer = append(topicBuffer, topic)
+							bufferSize++
+
+							// Check if we need to flush based on buffer size
+							if bufferSize >= c.cfg.BUFFER_MAX_SIZE {
+								log.Printf("Run update subs by Redis buffer size")
+								mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+								topicBuffer = make([]string, 0)
+								bufferSize = 0
+							}
 						}
 					}
 				}
-
 			}
 		}
 	}()

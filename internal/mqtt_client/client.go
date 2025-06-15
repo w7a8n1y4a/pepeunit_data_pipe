@@ -112,7 +112,7 @@ func (c *MQTTClient) Connect() error {
 						log.Printf("Failed to resubscribe: %v", err)
 					}
 				}
-				log.Printf("Success connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
+				log.Printf("Success Connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
 			},
 			OnConnectError: func(err error) {
 				log.Printf("MQTT connection error: %v", err)
@@ -380,7 +380,7 @@ func (c *MQTTClient) SubscribeMultipleWithCallback(filters map[string]byte, call
 			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
 		}
 
-		log.Printf("Success sub %d", len(filters))
+		log.Printf("Success Subcribtions: %d", len(filters))
 
 		// Process subscription results
 		for i, topic := range subscribe.Subscriptions {
