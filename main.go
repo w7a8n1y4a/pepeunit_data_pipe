@@ -79,7 +79,6 @@ func main() {
 	processor.StartConfigSync(ctx, redisDB, mqttClient)
 
 	// Subscribe to all topics using the buffer
-	log.Printf("Initializing subscriptions for active nodes")
 	mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
 
 	// Wait for interrupt signal

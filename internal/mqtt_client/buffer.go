@@ -83,6 +83,7 @@ func (b *SubscriptionBuffer) UpdateFromDatabase() error {
 			if err := b.client.UnsubscribeMultiple(toUnsubscribe); err != nil {
 				return fmt.Errorf("failed to unsubscribe: %w", err)
 			}
+			log.Printf("Success unsub %d", len(toUnsubscribe))
 		}
 
 		// Subscribe to new topics
@@ -110,9 +111,8 @@ func (b *SubscriptionBuffer) UpdateFromDatabase() error {
 			log.Printf("Failed to load node configurations: %v", err)
 		}
 
-		log.Printf("Successfully updated subscriptions: unsubscribed from %d topics, subscribed to %d topics", len(toUnsubscribe), len(toSubscribe))
 	} else {
-		log.Printf("No subscription changes needed")
+		log.Printf("Subscription update no needed")
 	}
 
 	return nil

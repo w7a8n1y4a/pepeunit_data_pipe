@@ -297,74 +297,6 @@ func (c *MQTTClient) GetSubscriptionCount() int {
 	return len(c.subscriptions)
 }
 
-func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-	defer cancel()
-
-	// Add to local subscriptions map
-	c.subMu.Lock()
-	for topic, qos := range filters {
-		c.subscriptions[topic] = paho.SubscribeOptions{
-			Topic: topic,
-			QoS:   qos,
-		}
-	}
-	c.subMu.Unlock()
-
-	c.connMu.RLock()
-	connected := c.connected
-	cm := c.cm
-	c.connMu.RUnlock()
-
-	if connected && cm != nil {
-		// Create subscribe packet
-		subscribe := &paho.Subscribe{
-			Subscriptions: make([]paho.SubscribeOptions, 0, len(filters)),
-		}
-
-		for topic, qos := range filters {
-			subscribe.Subscriptions = append(subscribe.Subscriptions, paho.SubscribeOptions{
-				Topic: topic,
-				QoS:   qos,
-			})
-		}
-
-		// Send subscribe request
-		if _, err := cm.Subscribe(ctx, subscribe); err != nil {
-			// If subscription fails, remove the topics from our local map
-			c.subMu.Lock()
-			for topic := range filters {
-				delete(c.subscriptions, topic)
-			}
-			c.subMu.Unlock()
-			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
-		}
-		log.Printf("Successfully subscribed to %d topics", len(filters))
-	}
-
-	return nil
-}
-
-// GetSubscribedTopics returns a list of currently subscribed topics
-func (c *MQTTClient) GetSubscribedTopics() []string {
-	c.subMu.RLock()
-	defer c.subMu.RUnlock()
-
-	topics := make([]string, 0, len(c.subscriptions))
-	for topic := range c.subscriptions {
-		topics = append(topics, topic)
-	}
-	return topics
-}
-
-// IsSubscribed checks if a topic is currently subscribed
-func (c *MQTTClient) IsSubscribed(topic string) bool {
-	c.subMu.RLock()
-	defer c.subMu.RUnlock()
-	_, exists := c.subscriptions[topic]
-	return exists
-}
-
 // UnsubscribeMultiple unsubscribes from multiple topics
 func (c *MQTTClient) UnsubscribeMultiple(topics []string) error {
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
@@ -448,6 +380,8 @@ func (c *MQTTClient) SubscribeMultipleWithCallback(filters map[string]byte, call
 			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
 		}
 
+		log.Printf("Success sub %d", len(filters))
+
 		// Process subscription results
 		for i, topic := range subscribe.Subscriptions {
 			if i < len(resp.Reasons) {
@@ -456,8 +390,6 @@ func (c *MQTTClient) SubscribeMultipleWithCallback(filters map[string]byte, call
 				callback(topic.Topic, fmt.Errorf("no response for topic"))
 			}
 		}
-
-		log.Printf("Successfully subscribed to %d topics", len(filters))
 	}
 
 	return nil
