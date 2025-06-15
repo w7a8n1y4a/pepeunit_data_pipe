@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
 	"data_pipe/internal/datapipe/active_period"
@@ -16,6 +15,7 @@ import (
 	"data_pipe/internal/datapipe/filters"
 	"data_pipe/internal/datapipe/processing_policy"
 	"data_pipe/internal/datapipe/transformations"
+	"data_pipe/internal/mqtt_client"
 
 	"github.com/google/uuid"
 )

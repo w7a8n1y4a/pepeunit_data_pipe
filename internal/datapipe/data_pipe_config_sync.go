@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"data_pipe/internal/clients/mqtt_client"
 	"data_pipe/internal/config"
 	"data_pipe/internal/database"
+	"data_pipe/internal/mqtt_client"
 	"data_pipe/internal/types"
 
 	"github.com/redis/go-redis/v9"
