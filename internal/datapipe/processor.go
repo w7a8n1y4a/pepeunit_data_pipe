@@ -3,6 +3,7 @@ package datapipe
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -103,17 +104,20 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 
 	config, exists := p.configs.Get(nodeUUID)
 	if !exists {
+		log.Printf("No configuration found for node %s", nodeUUID)
 		return nil
 	}
 
 	currentTime := time.Now()
 	if !active_period.IsActive(&config.ActivePeriod, currentTime) {
+		log.Printf("Node %s is not active at %v", nodeUUID, currentTime)
 		return nil
 	}
 
 	nodeState := p.getNodeState(nodeUUID)
 	shouldProcess := filters.ApplyFilters(string(payload), config.Filters, nodeState.LastMessageTime, nodeState.LastValue)
 	if !shouldProcess {
+		log.Printf("Message from node %s filtered out", nodeUUID)
 		return nil
 	}
 
@@ -123,6 +127,7 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 		var err error
 		transformedValue, err = transformations.ApplyTransformations(string(payload), config.Transformations, &config.Filters)
 		if err != nil {
+			log.Printf("Failed to apply transformations for node %s: %v", nodeUUID, err)
 			return nil
 		}
 	}
@@ -138,6 +143,7 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 	ctxWithConfig = context.WithValue(ctxWithConfig, "filters", config.Filters)
 
 	if err := p.policy.ApplyProcessingPolicy(ctxWithConfig, uuid, transformedValue, currentTime, config.ProcessingPolicy); err != nil {
+		log.Printf("Failed to apply processing policy for node %s: %v", nodeUUID, err)
 		return fmt.Errorf("failed to apply processing policy: %w", err)
 	}
 

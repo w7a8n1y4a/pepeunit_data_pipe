@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -64,7 +63,9 @@ func main() {
 	}
 
 	// 5. Initialize MQTT client
-	mqttClient, err := mqtt_client.New(cfg, messageHandler)
+	mqttClient, err := mqtt_client.New(cfg, messageHandler, postgresDB, func(ctx context.Context) error {
+		return processor.LoadNodeConfigs(ctx)
+	})
 	if err != nil {
 		log.Fatalf("Failed to create MQTT client: %v", err)
 	}
@@ -77,25 +78,9 @@ func main() {
 	// 6. Start configuration synchronization
 	processor.StartConfigSync(ctx, redisDB, mqttClient)
 
-	// Get active nodes and create topics map
-	nodes, err := postgresDB.GetActiveUnitNodes(ctx)
-	if err != nil {
-		log.Printf("Failed to get active nodes: %v", err)
-		return
-	}
-
-	// Create topics list for subscription
-	topics := make([]string, 0, len(nodes))
-	for _, node := range nodes {
-		if node.DataPipeYML != nil {
-			topic := fmt.Sprintf("%s/%s", cfg.BACKEND_DOMAIN, node.UUID)
-			topics = append(topics, topic)
-		}
-	}
-
 	// Subscribe to all topics using the buffer
-	log.Printf("Send %d topics to subs buffer - at start app", len(topics))
-	mqttClient.SubscriptionBuffer.UpdateFromDatabase(topics)
+	log.Printf("Initializing subscriptions for active nodes")
+	mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)

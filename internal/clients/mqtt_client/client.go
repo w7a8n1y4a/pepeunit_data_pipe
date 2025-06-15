@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"data_pipe/internal/config"
+	"data_pipe/internal/database"
 
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
@@ -40,10 +41,12 @@ type MQTTClient struct {
 	wg                 sync.WaitGroup
 	connected          bool
 	connectOnce        sync.Once
-	SubscriptionBuffer *SubscriptionBuffer
+	subscriptionBuffer *SubscriptionBuffer
+	postgresDB         *database.PostgresDB
+	loadConfigs        func(ctx context.Context) error
 }
 
-func New(cfg *config.Config, messageHandler func(topic string, payload []byte)) (*MQTTClient, error) {
+func New(cfg *config.Config, messageHandler func(topic string, payload []byte), postgresDB *database.PostgresDB, loadConfigs func(ctx context.Context) error) (*MQTTClient, error) {
 	if cfg == nil {
 		return nil, errors.New("config cannot be nil")
 	}
@@ -61,10 +64,12 @@ func New(cfg *config.Config, messageHandler func(topic string, payload []byte)) 
 		messageHandler: messageHandler,
 		ctx:            ctx,
 		cancel:         cancel,
+		postgresDB:     postgresDB,
+		loadConfigs:    loadConfigs,
 	}
 
 	// Initialize subscription buffer
-	client.SubscriptionBuffer = NewSubscriptionBuffer(client, 100, 5*time.Second)
+	client.subscriptionBuffer = NewSubscriptionBuffer(client)
 
 	return client, nil
 }
@@ -400,12 +405,116 @@ func (c *MQTTClient) UnsubscribeMultiple(topics []string) error {
 
 // Close closes the MQTT client
 func (c *MQTTClient) Close() {
-	if c.SubscriptionBuffer != nil {
-		c.SubscriptionBuffer.Close()
+	if c.subscriptionBuffer != nil {
+		c.subscriptionBuffer.Close()
 	}
 	c.cancel()
 	if c.cm != nil {
 		_ = c.cm.Disconnect(context.Background())
 	}
 	c.wg.Wait()
+}
+
+// SubscribeMultipleWithCallback subscribes to multiple topics with a callback
+func (c *MQTTClient) SubscribeMultipleWithCallback(filters map[string]byte, callback func(topic string, err error)) error {
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+
+	// Add to local subscriptions map
+	c.subMu.Lock()
+	for topic, qos := range filters {
+		c.subscriptions[topic] = paho.SubscribeOptions{
+			Topic: topic,
+			QoS:   qos,
+		}
+	}
+	c.subMu.Unlock()
+
+	c.connMu.RLock()
+	connected := c.connected
+	cm := c.cm
+	c.connMu.RUnlock()
+
+	if connected && cm != nil {
+		// Create subscribe packet
+		subscribe := &paho.Subscribe{
+			Subscriptions: make([]paho.SubscribeOptions, 0, len(filters)),
+		}
+
+		for topic, qos := range filters {
+			subscribe.Subscriptions = append(subscribe.Subscriptions, paho.SubscribeOptions{
+				Topic: topic,
+				QoS:   qos,
+			})
+		}
+
+		// Send subscribe request
+		resp, err := cm.Subscribe(ctx, subscribe)
+		if err != nil {
+			// If subscription fails, remove the topics from our local map
+			c.subMu.Lock()
+			for topic := range filters {
+				delete(c.subscriptions, topic)
+			}
+			c.subMu.Unlock()
+			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
+		}
+
+		// Process subscription results
+		for i, topic := range subscribe.Subscriptions {
+			if i < len(resp.Reasons) {
+				callback(topic.Topic, nil)
+			} else {
+				callback(topic.Topic, fmt.Errorf("no response for topic"))
+			}
+		}
+
+		log.Printf("Successfully subscribed to %d topics", len(filters))
+	}
+
+	return nil
+}
+
+// GetActiveTopics returns a list of topics for active nodes
+func (c *MQTTClient) GetActiveTopics(ctx context.Context) ([]string, error) {
+	// Get active nodes from database
+	nodes, err := c.postgresDB.GetActiveUnitNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active nodes: %w", err)
+	}
+
+	// Create topics list for subscription
+	topics := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node.DataPipeYML != nil {
+			topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
+			topics = append(topics, topic)
+		}
+	}
+
+	return topics, nil
+}
+
+// Subscribe subscribes to a single topic
+func (c *MQTTClient) Subscribe(topic string) error {
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+
+	_, err := c.cm.Subscribe(ctx, &paho.Subscribe{
+		Subscriptions: []paho.SubscribeOptions{
+			{
+				Topic: topic,
+				QoS:   0,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
+	}
+	return nil
+}
+
+// GetSubscriptionBuffer returns the subscription buffer
+func (c *MQTTClient) GetSubscriptionBuffer() *SubscriptionBuffer {
+	return c.subscriptionBuffer
 }

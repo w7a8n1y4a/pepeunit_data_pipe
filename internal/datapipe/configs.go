@@ -159,9 +159,9 @@ func NewMessageBuffer(mqtt *mqtt_client.MQTTClient, cfg *config.Config) *Message
 					b.messages = make(map[string]struct{})
 					b.mu.Unlock()
 
-					// Add topics to subscription buffer
-					b.mqtt.SubscriptionBuffer.BulkAdd(topics)
-					log.Printf("Success send %d topics to subs buffer - at redis by time", len(topics))
+					// Update subscriptions using UpdateFromDatabase
+					log.Println("Run update subs by redis buffer timer")
+					b.mqtt.GetSubscriptionBuffer().UpdateFromDatabase()
 				} else {
 					b.mu.Unlock()
 				}
@@ -195,14 +195,11 @@ func (b *MessageBuffer) Add(topic string) {
 		}
 		// Clear the buffer
 		b.messages = make(map[string]struct{})
-		// Unlock before calling BulkAdd
+		// Unlock before calling UpdateFromDatabase
 		b.mu.Unlock()
-		// Add topics to subscription buffer
-		b.mqtt.SubscriptionBuffer.BulkAdd(topics)
-		log.Printf("Success send %d topics to subs buffer - at redis by size buffer", len(topics))
-
-		// Lock back
-		b.mu.Lock()
+		// Update subscriptions using UpdateFromDatabase
+		log.Println("Run update subs by redis buffer size")
+		b.mqtt.GetSubscriptionBuffer().UpdateFromDatabase()
 	}
 }
 
@@ -239,51 +236,19 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 				if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
 					log.Printf("Failed to sync configurations from PostgreSQL: %v", err)
 				} else {
-					// Update MQTT subscriptions after successful sync
-					nodes, err := postgresDB.GetActiveUnitNodes(ctx)
-					if err != nil {
-						log.Printf("Failed to get active nodes for MQTT subscription update: %v", err)
-						continue
-					}
-
-					// Create list of topics to subscribe to
-					topics := make([]string, 0, len(nodes))
-					for _, node := range nodes {
-						if node.DataPipeYML != nil {
-							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
-							topics = append(topics, topic)
-						}
-					}
 
 					// Update subscriptions using the buffer
-					log.Printf("Send %d topics to subs buffer - at gorutine for Postgres", len(topics))
-					mqttClient.SubscriptionBuffer.UpdateFromDatabase(topics)
+					log.Println("Run update subs by Gorutine")
+					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
 				}
 			}
 		}
 	}()
 
-	// Create message buffer for Redis updates
-	msgBuffer := NewMessageBuffer(mqttClient, c.cfg)
-
 	// Start Redis stream processing
 	go func() {
 		lastID := "$" // Start from the latest message
 		log.Printf("Success starting Redis stream processing")
-
-		// Start message processor
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					log.Printf("Context done, closing message buffer")
-					msgBuffer.Close()
-					return
-				case <-msgBuffer.done:
-					return
-				}
-			}
-		}()
 
 		for {
 			select {
@@ -292,65 +257,44 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 			default:
 				messages, err := redisDB.ReadStream(ctx, "backend_data_pipe_nodes", lastID)
 				if err != nil {
-					log.Printf("Failed to read from Redis stream: %v", err)
-					time.Sleep(time.Second) // Wait before retrying
+					if err != redis.Nil {
+						log.Printf("Error reading from Redis stream: %v", err)
+					}
 					continue
 				}
 
-				if len(messages) > 0 {
-					for _, msg := range messages {
-						lastID = msg.ID
+				if len(messages) == 0 {
+					continue
+				}
 
-						// Parse message
-						action, ok := msg.Values["action"].(string)
-						if !ok {
-							continue
-						}
+				// Собираем все топики из сообщений
+				var allTopics []string
+				for _, message := range messages {
+					lastID = message.ID
+					values := message.Values
+					if topic, ok := values["topic"].(string); ok {
+						allTopics = append(allTopics, topic)
+					}
+				}
 
-						unitNodeData, ok := msg.Values["unit_node_data"].(string)
-						if !ok {
-							continue
-						}
+				// Обновляем подписки одним пакетом
+				if len(allTopics) > 0 {
+					log.Printf("Updating subscriptions for %d topics from Redis", len(allTopics))
+					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+				}
 
-						var unitNode struct {
-							UUID        string  `json:"uuid"`
-							TopicName   string  `json:"topic_name"`
-							DataPipeYML *string `json:"data_pipe_yml"`
-						}
-
-						if err := json.Unmarshal([]byte(unitNodeData), &unitNode); err != nil {
-							continue
-						}
-
-						// Update configurations and subscriptions
-						switch action {
-						case "Update":
-							if unitNode.DataPipeYML != nil {
-								c.Set(unitNode.UUID, *unitNode.DataPipeYML)
-								topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
-								msgBuffer.Add(topic)
-							}
-						case "Delete":
-							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, unitNode.UUID)
-							if err := mqttClient.Unsubscribe(topic); err != nil {
-								log.Printf("Failed to unsubscribe from topic %s: %v", topic, err)
-							}
-							c.Remove(unitNode.UUID)
-						}
+				// Подтверждаем обработку всех сообщений
+				for _, message := range messages {
+					// Добавляем сообщение в поток подтверждений
+					_, err := redisDB.AddToStream(ctx, "backend_data_pipe_nodes_ack", map[string]interface{}{
+						"original_id": message.ID,
+						"status":      "processed",
+					})
+					if err != nil {
+						log.Printf("Error acknowledging message %s: %v", message.ID, err)
 					}
 				}
 			}
 		}
 	}()
-}
-
-// GetAll returns all configurations
-func (c *DataPipeConfigs) GetAll() map[string]string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	configs := make(map[string]string, len(c.configs))
-	for k, v := range c.configs {
-		configs[k] = v
-	}
-	return configs
 }
