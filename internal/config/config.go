@@ -17,7 +17,7 @@ type Config struct {
 	CONFIG_SYNC_INTERVAL      int    `env:"CONFIG_SYNC_INTERVAL" envDefault:"60"`      // Configuration sync interval in seconds
 	NRECORDS_CLEANUP_INTERVAL int    `env:"NRECORDS_CLEANUP_INTERVAL" envDefault:"60"` // Interval in seconds
 	BUFFER_FLUSH_INTERVAL     int    `env:"BUFFER_FLUSH_INTERVAL" envDefault:"5"`      // Buffer flush interval in seconds
-	BUFFER_MAX_SIZE           int    `env:"BUFFER_MAX_SIZE" envDefault:"200"`          // Maximum number of entries in buffer
+	BUFFER_MAX_SIZE           int    `env:"BUFFER_MAX_SIZE" envDefault:"1000"`         // Maximum number of entries in buffer
 }
 
 func Load() (*Config, error) {

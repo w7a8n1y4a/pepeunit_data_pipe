@@ -89,20 +89,16 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 		ticker := time.NewTicker(time.Duration(c.cfg.CONFIG_SYNC_INTERVAL) * time.Second)
 		defer ticker.Stop()
 
-		log.Println("Success PostgreSQL periodic gorutine start")
+		log.Println("Success Config Update periodic gorutine start")
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				log.Println("Run gorutine update configs by main timer")
 				if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
 					log.Printf("Failed to sync configurations by Gorutine: %v", err)
-				} else {
-
-					// Update subscriptions using the buffer
-					log.Println("Run update subs by main timer")
-					mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
 				}
 			}
 		}
@@ -126,8 +122,10 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 				select {
 				case <-ticker.C:
 					if bufferSize > 0 {
-						log.Printf("Run update subs by Redis buffer timer")
-						mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+						log.Printf("Run update configs by Redis buffer timer")
+						if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
+							log.Printf("Failed to update configurations: %v", err)
+						}
 						topicBuffer = make([]string, 0)
 						bufferSize = 0
 					}
@@ -154,7 +152,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 					continue
 				}
 
-				// Process messages and add topics to buffer
+				// Process messages
 				for _, message := range messages {
 					lastID = message.ID
 					values := message.Values
@@ -173,8 +171,10 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 
 							// Check if we need to flush based on buffer size
 							if bufferSize >= c.cfg.BUFFER_MAX_SIZE {
-								log.Printf("Run update subs by Redis buffer size")
-								mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
+								log.Printf("Run update configs by Redis buffer size")
+								if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
+									log.Printf("Failed to update configurations: %v", err)
+								}
 								topicBuffer = make([]string, 0)
 								bufferSize = 0
 							}

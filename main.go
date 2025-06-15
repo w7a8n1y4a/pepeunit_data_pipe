@@ -78,9 +78,6 @@ func main() {
 	// 6. Start configuration synchronization
 	processor.StartConfigSync(ctx, redisDB, mqttClient)
 
-	// Subscribe to all topics using the buffer
-	mqttClient.GetSubscriptionBuffer().UpdateFromDatabase()
-
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

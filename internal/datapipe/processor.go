@@ -104,7 +104,6 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 
 	config, exists := p.configs.Get(nodeUUID)
 	if !exists {
-		log.Printf("No configuration found for node %s", nodeUUID)
 		return nil
 	}
 
