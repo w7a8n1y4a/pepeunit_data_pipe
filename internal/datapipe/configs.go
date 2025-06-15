@@ -150,21 +150,17 @@ func NewMessageBuffer(mqtt *mqtt_client.MQTTClient, cfg *config.Config) *Message
 			case <-b.ticker.C:
 				b.mu.Lock()
 				if len(b.messages) > 0 {
-					// Создаем копию сообщений для обработки
-					topics := make(map[string]byte, len(b.messages))
+					// Create list of topics for subscription
+					topics := make([]string, 0, len(b.messages))
 					for t := range b.messages {
-						topics[t] = 0
+						topics = append(topics, t)
 					}
-					// Очищаем буфер
+					// Clear the buffer
 					b.messages = make(map[string]struct{})
 					b.mu.Unlock()
 
-					// Подписываемся на топики
-					if err := b.mqtt.SubscribeMultiple(topics); err != nil {
-						log.Printf("Failed to subscribe to topics: %v", err)
-					} else {
-						log.Printf("Successfully subscribed to %d topics", len(topics))
-					}
+					// Add topics to subscription buffer
+					b.mqtt.SubscriptionBuffer.BulkAdd(topics)
 					log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
 				} else {
 					b.mu.Unlock()
@@ -190,25 +186,21 @@ func (b *MessageBuffer) Add(topic string) {
 	b.messages[topic] = struct{}{}
 	currentSize := len(b.messages)
 
-	// Если достигли максимального размера, сбрасываем буфер немедленно
+	// If we've reached max size, flush immediately
 	if currentSize >= b.maxSize {
-		// Создаем копию сообщений для обработки
-		topics := make(map[string]byte, len(b.messages))
+		// Create list of topics for subscription
+		topics := make([]string, 0, len(b.messages))
 		for t := range b.messages {
-			topics[t] = 0
+			topics = append(topics, t)
 		}
-		// Очищаем буфер
+		// Clear the buffer
 		b.messages = make(map[string]struct{})
-		// Разблокируем мьютекс перед вызовом SubscribeMultiple
+		// Unlock before calling BulkAdd
 		b.mu.Unlock()
-		// Подписываемся на топики
-		if err := b.mqtt.SubscribeMultiple(topics); err != nil {
-			log.Printf("Failed to subscribe to topics: %v", err)
-		} else {
-			log.Printf("Successfully subscribed to %d topics", len(topics))
-		}
+		// Add topics to subscription buffer
+		b.mqtt.SubscriptionBuffer.BulkAdd(topics)
 		log.Printf("Active subs after Redis get message: %d", b.mqtt.GetSubscriptionCount())
-		// Блокируем мьютекс обратно
+		// Lock back
 		b.mu.Lock()
 	}
 }
@@ -253,21 +245,17 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 						continue
 					}
 
-					// Create a map of topics to subscribe to
-					topics := make(map[string]byte)
+					// Create list of topics to subscribe to
+					topics := make([]string, 0, len(nodes))
 					for _, node := range nodes {
 						if node.DataPipeYML != nil {
 							topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
-							topics[topic] = 0
+							topics = append(topics, topic)
 						}
 					}
 
-					// Subscribe to all topics at once
-					if err := mqttClient.SubscribeMultiple(topics); err != nil {
-						log.Printf("Failed to subscribe to topics: %v", err)
-					} else {
-						log.Printf("Successfully subscribed to %d topics", len(topics))
-					}
+					// Update subscriptions using the buffer
+					mqttClient.SubscriptionBuffer.UpdateFromDatabase(topics)
 				}
 			}
 		}

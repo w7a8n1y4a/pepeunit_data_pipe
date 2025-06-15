@@ -28,17 +28,18 @@ func WithReconnectInterval(interval time.Duration) ClientOption {
 }
 
 type MQTTClient struct {
-	cfg            *config.Config
-	cm             *autopaho.ConnectionManager
-	router         *paho.StandardRouter
-	subscriptions  map[string]paho.SubscribeOptions
-	messageHandler func(topic string, payload []byte)
-	mu             sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	connected      bool
-	connectOnce    sync.Once
+	cfg                *config.Config
+	cm                 *autopaho.ConnectionManager
+	router             *paho.StandardRouter
+	subscriptions      map[string]paho.SubscribeOptions
+	messageHandler     func(topic string, payload []byte)
+	mu                 sync.RWMutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	connected          bool
+	connectOnce        sync.Once
+	SubscriptionBuffer *SubscriptionBuffer
 }
 
 func New(cfg *config.Config, messageHandler func(topic string, payload []byte)) (*MQTTClient, error) {
@@ -52,14 +53,19 @@ func New(cfg *config.Config, messageHandler func(topic string, payload []byte)) 
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &MQTTClient{
+	client := &MQTTClient{
 		cfg:            cfg,
 		router:         paho.NewStandardRouter(),
 		subscriptions:  make(map[string]paho.SubscribeOptions),
 		messageHandler: messageHandler,
 		ctx:            ctx,
 		cancel:         cancel,
-	}, nil
+	}
+
+	// Initialize subscription buffer
+	client.SubscriptionBuffer = NewSubscriptionBuffer(client, 100, 5*time.Second)
+
+	return client, nil
 }
 
 func (c *MQTTClient) Connect() error {
@@ -95,6 +101,7 @@ func (c *MQTTClient) Connect() error {
 				c.mu.Unlock()
 
 				if !wasConnected {
+					log.Println("Re sub")
 					if err := c.resubscribe(); err != nil {
 						log.Printf("Failed to resubscribe: %v", err)
 					}
@@ -282,19 +289,6 @@ func generateToken(cfg *config.Config) (string, error) {
 	return signedToken, nil
 }
 
-// GetSubscriptions returns a map of current subscriptions
-func (c *MQTTClient) GetSubscriptions() map[string]struct{} {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// Create a copy of the subscriptions map
-	subs := make(map[string]struct{}, len(c.subscriptions))
-	for topic := range c.subscriptions {
-		subs[topic] = struct{}{}
-	}
-	return subs
-}
-
 // GetSubscriptionCount returns the number of current subscriptions
 func (c *MQTTClient) GetSubscriptionCount() int {
 	c.mu.RLock()
@@ -340,6 +334,7 @@ func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
 			})
 		}
 
+		log.Println("Test multi subs")
 		// Send subscribe request
 		if _, err := c.cm.Subscribe(ctx, subscribe); err != nil {
 			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
@@ -347,4 +342,54 @@ func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
 	}
 
 	return nil
+}
+
+// UnsubscribeMultiple unsubscribes from multiple topics
+func (c *MQTTClient) UnsubscribeMultiple(topics []string) error {
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		c.mu.Lock()
+		close(lockAcquired)
+	}()
+
+	select {
+	case <-lockAcquired:
+		defer c.mu.Unlock()
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for lock while unsubscribing from multiple topics")
+	}
+
+	// Remove from local subscriptions map
+	for _, topic := range topics {
+		delete(c.subscriptions, topic)
+	}
+
+	if c.connected && c.cm != nil {
+		// Create unsubscribe packet
+		unsubscribe := &paho.Unsubscribe{
+			Topics: topics,
+		}
+
+		// Send unsubscribe request
+		if _, err := c.cm.Unsubscribe(ctx, unsubscribe); err != nil {
+			return fmt.Errorf("failed to unsubscribe from multiple topics: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// Close closes the MQTT client
+func (c *MQTTClient) Close() {
+	if c.SubscriptionBuffer != nil {
+		c.SubscriptionBuffer.Close()
+	}
+	c.cancel()
+	if c.cm != nil {
+		_ = c.cm.Disconnect(context.Background())
+	}
+	c.wg.Wait()
 }

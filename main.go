@@ -77,28 +77,24 @@ func main() {
 	// 6. Start configuration synchronization
 	processor.StartConfigSync(ctx, redisDB, mqttClient)
 
-	// Subscribe to initial set of topics
-	activeNodes, err := postgresDB.GetActiveUnitNodes(ctx)
+	// Get active nodes and create topics map
+	nodes, err := postgresDB.GetActiveUnitNodes(ctx)
 	if err != nil {
-		log.Fatalf("Failed to get active unit nodes: %v", err)
+		log.Printf("Failed to get active nodes: %v", err)
+		return
 	}
-	log.Printf("Success get %d unit nodes with active pipe", len(activeNodes))
 
-	// Create a map of topics to subscribe to
-	topics := make(map[string]byte)
-	for _, node := range activeNodes {
+	// Create topics list for subscription
+	topics := make([]string, 0, len(nodes))
+	for _, node := range nodes {
 		if node.DataPipeYML != nil {
-			fullTopicName := fmt.Sprintf("%s/%s", cfg.BACKEND_DOMAIN, node.UUID)
-			topics[fullTopicName] = 0
+			topic := fmt.Sprintf("%s/%s", cfg.BACKEND_DOMAIN, node.UUID)
+			topics = append(topics, topic)
 		}
 	}
 
-	// Subscribe to all topics at once
-	if err := mqttClient.SubscribeMultiple(topics); err != nil {
-		log.Printf("Failed to subscribe to topics: %v", err)
-	}
-
-	log.Printf("Active subs: %d", mqttClient.GetSubscriptionCount())
+	// Subscribe to all topics using the buffer
+	mqttClient.SubscriptionBuffer.UpdateFromDatabase(topics)
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
