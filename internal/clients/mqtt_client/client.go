@@ -296,28 +296,22 @@ func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
 
-	lockAcquired := make(chan struct{})
-	go func() {
-		c.subMu.Lock()
-		close(lockAcquired)
-	}()
-
-	select {
-	case <-lockAcquired:
-		defer c.subMu.Unlock()
-	case <-ctx.Done():
-		return fmt.Errorf("timed out waiting for lock while subscribing to multiple topics")
-	}
-
 	// Add to local subscriptions map
+	c.subMu.Lock()
 	for topic, qos := range filters {
 		c.subscriptions[topic] = paho.SubscribeOptions{
 			Topic: topic,
 			QoS:   qos,
 		}
 	}
+	c.subMu.Unlock()
 
-	if c.connected && c.cm != nil {
+	c.connMu.RLock()
+	connected := c.connected
+	cm := c.cm
+	c.connMu.RUnlock()
+
+	if connected && cm != nil {
 		// Create subscribe packet
 		subscribe := &paho.Subscribe{
 			Subscriptions: make([]paho.SubscribeOptions, 0, len(filters)),
@@ -330,16 +324,40 @@ func (c *MQTTClient) SubscribeMultiple(filters map[string]byte) error {
 			})
 		}
 
-		// log.Printf("Send subscribe query over MQTT for %d topics", len(filters))
-
 		// Send subscribe request
-		if _, err := c.cm.Subscribe(ctx, subscribe); err != nil {
+		if _, err := cm.Subscribe(ctx, subscribe); err != nil {
+			// If subscription fails, remove the topics from our local map
+			c.subMu.Lock()
+			for topic := range filters {
+				delete(c.subscriptions, topic)
+			}
+			c.subMu.Unlock()
 			return fmt.Errorf("failed to subscribe to multiple topics: %w", err)
 		}
-		log.Printf("Active %d topic subsriptions", c.GetSubscriptionCount())
+		log.Printf("Successfully subscribed to %d topics", len(filters))
 	}
 
 	return nil
+}
+
+// GetSubscribedTopics returns a list of currently subscribed topics
+func (c *MQTTClient) GetSubscribedTopics() []string {
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
+
+	topics := make([]string, 0, len(c.subscriptions))
+	for topic := range c.subscriptions {
+		topics = append(topics, topic)
+	}
+	return topics
+}
+
+// IsSubscribed checks if a topic is currently subscribed
+func (c *MQTTClient) IsSubscribed(topic string) bool {
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
+	_, exists := c.subscriptions[topic]
+	return exists
 }
 
 // UnsubscribeMultiple unsubscribes from multiple topics
