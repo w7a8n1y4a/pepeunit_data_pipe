@@ -12,11 +12,11 @@ func ApplyFilters(value string, config types.FiltersConfig, lastMessageTime time
 	if config.TypeValueFiltering != nil {
 		switch *config.TypeValueFiltering {
 		case types.FilterTypeValueFilteringWhiteList:
-			if !isInList(value, config.FilteringValues) {
+			if !isInList(value, config.FilteringValues, config) {
 				return false
 			}
 		case types.FilterTypeValueFilteringBlackList:
-			if isInList(value, config.FilteringValues) {
+			if isInList(value, config.FilteringValues, config) {
 				return false
 			}
 		}
@@ -67,14 +67,14 @@ func ApplyFilters(value string, config types.FiltersConfig, lastMessageTime time
 }
 
 // isInList checks if a value is in the list of values
-func isInList(value string, list []interface{}) bool {
+func isInList(value string, list []interface{}, config types.FiltersConfig) bool {
 	for _, v := range list {
-		switch v := v.(type) {
-		case string:
+		switch config.TypeInputValue {
+		case types.TypeInputValueText:
 			if v == value {
 				return true
 			}
-		case float64:
+		case types.TypeInputValueNumber:
 			if num, err := strconv.ParseFloat(value, 64); err == nil && num == v {
 				return true
 			}
