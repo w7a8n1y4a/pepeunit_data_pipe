@@ -10,7 +10,7 @@ type Config struct {
 	BACKEND_SECRET_KEY        string `env:"BACKEND_SECRET_KEY" envDefault:""`
 	SQLALCHEMY_DATABASE_URL   string `env:"SQLALCHEMY_DATABASE_URL" envDefault:""`
 	CLICKHOUSE_DATABASE_URL   string `env:"CLICKHOUSE_DATABASE_URL" envDefault:""`
-	REDIS_URL                 string `env:"REDIS_URL" envDefault:""`
+	REDIS_URL                 string `env:"REDIS_URL" envDefault:"redis://redis:6379/0"`
 	MQTT_HOST                 string `env:"MQTT_HOST" envDefault:""`
 	MQTT_PORT                 int    `env:"MQTT_PORT" envDefault:"1883"`
 	MQTT_KEEPALIVE            int    `env:"MQTT_KEEPALIVE" envDefault:"60"`
