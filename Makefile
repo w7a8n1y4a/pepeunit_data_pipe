@@ -21,5 +21,5 @@ run-build:
 	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o data_pipe .
 
 clean:
-	@echo "Clean node_modules and dist..."
+	@echo "Clean cache package and data_pipe binary..."
 	go clean -modcache && rm -rf data_pipe 
