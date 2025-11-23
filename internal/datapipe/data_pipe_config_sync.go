@@ -86,7 +86,7 @@ func (c *DataPipeConfigs) LoadNodeConfigs(ctx context.Context, postgresDB *datab
 func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *database.PostgresDB, redisDB *database.RedisDB, mqttClient *mqtt_client.MQTTClient) {
 	// Start periodic sync
 	go func() {
-		ticker := time.NewTicker(time.Duration(c.cfg.CONFIG_SYNC_INTERVAL) * time.Second)
+		ticker := time.NewTicker(time.Duration(c.cfg.PU_DP_CONFIG_SYNC_INTERVAL) * time.Second)
 		defer ticker.Stop()
 
 		log.Println("Success Config Update periodic gorutine start")
@@ -115,7 +115,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 
 		// Start timer goroutine
 		go func() {
-			ticker := time.NewTicker(time.Duration(c.cfg.BUFFER_FLUSH_INTERVAL) * time.Second)
+			ticker := time.NewTicker(time.Duration(c.cfg.PU_DP_BUFFER_FLUSH_INTERVAL) * time.Second)
 			defer ticker.Stop()
 
 			for {
@@ -170,7 +170,7 @@ func (c *DataPipeConfigs) StartConfigSync(ctx context.Context, postgresDB *datab
 							bufferSize++
 
 							// Check if we need to flush based on buffer size
-							if bufferSize >= c.cfg.BUFFER_MAX_SIZE {
+							if bufferSize >= c.cfg.PU_DP_BUFFER_MAX_SIZE {
 								log.Printf("Run update configs by Redis buffer size")
 								if err := c.LoadNodeConfigs(ctx, postgresDB); err != nil {
 									log.Printf("Failed to update configurations: %v", err)

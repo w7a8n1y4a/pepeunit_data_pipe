@@ -25,20 +25,20 @@ func main() {
 	defer cancel()
 
 	// 2. Initialize database connections
-	clickhouseDB, err := database.NewClickHouse(cfg.CLICKHOUSE_DATABASE_URL)
+	clickhouseDB, err := database.NewClickHouse(cfg.PU_DP_CLICKHOUSE_DATABASE_URL)
 	if err != nil {
 		log.Fatalf("Failed to connect to ClickHouse: %v", err)
 	}
 	defer clickhouseDB.Close()
 
-	postgresDB, err := database.NewPostgres(cfg.SQLALCHEMY_DATABASE_URL)
+	postgresDB, err := database.NewPostgres(cfg.PU_DP_SQLALCHEMY_DATABASE_URL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer postgresDB.Close()
 
 	// Initialize Redis client
-	redisDB, err := database.NewRedis(cfg.REDIS_URL)
+	redisDB, err := database.NewRedis(cfg.PU_DP_REDIS_URL)
 	if err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}

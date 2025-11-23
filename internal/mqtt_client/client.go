@@ -78,8 +78,8 @@ func (c *MQTTClient) Connect() error {
 
 		mqttURL := fmt.Sprintf(
 			"mqtt://%s:%d",
-			c.cfg.MQTT_HOST,
-			c.cfg.MQTT_PORT,
+			c.cfg.PU_DP_MQTT_HOST,
+			c.cfg.PU_DP_MQTT_PORT,
 		)
 
 		serverURL, err := url.Parse(mqttURL)
@@ -90,7 +90,7 @@ func (c *MQTTClient) Connect() error {
 
 		cliCfg := autopaho.ClientConfig{
 			ServerUrls:                    []*url.URL{serverURL},
-			KeepAlive:                     uint16(c.cfg.MQTT_KEEPALIVE),
+			KeepAlive:                     uint16(c.cfg.PU_DP_MQTT_KEEPALIVE),
 			CleanStartOnInitialConnection: true,
 			SessionExpiryInterval:         0,
 			OnConnectionUp: func(cm *autopaho.ConnectionManager, connAck *paho.Connack) {
@@ -110,7 +110,7 @@ func (c *MQTTClient) Connect() error {
 						log.Printf("Failed to subscribe: %v", err)
 					}
 				}
-				log.Printf("Success Connected to MQTT broker at %s:%d", c.cfg.MQTT_HOST, c.cfg.MQTT_PORT)
+				log.Printf("Success Connected to MQTT broker at %s:%d", c.cfg.PU_DP_MQTT_HOST, c.cfg.PU_DP_MQTT_PORT)
 			},
 			OnConnectError: func(err error) {
 				log.Printf("MQTT connection error: %v", err)
@@ -121,7 +121,7 @@ func (c *MQTTClient) Connect() error {
 				go c.reconnect()
 			},
 			ClientConfig: paho.ClientConfig{
-				ClientID: c.cfg.BACKEND_DOMAIN,
+				ClientID: c.cfg.PU_DP_DOMAIN,
 				Router:   c.router,
 				OnClientError: func(err error) {
 					log.Printf("MQTT client error: %v", err)
@@ -168,9 +168,10 @@ func (c *MQTTClient) Connect() error {
 	return connectErr
 }
 
-// subscribe subscribes to the single topic BACKEND_DOMAIN/+
+// subscribe subscribes to the single topic PU_DP_DOMAIN/+
 func (c *MQTTClient) subscribe() error {
-	topic := fmt.Sprintf("%s/+/pepeunit", c.cfg.BACKEND_DOMAIN)
+	fmt.Println(c.cfg.PU_DP_DOMAIN)
+	topic := fmt.Sprintf("%s/+/pepeunit", c.cfg.PU_DP_DOMAIN)
 
 	_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{
 		Subscriptions: []paho.SubscribeOptions{
@@ -261,13 +262,13 @@ func (c *MQTTClient) Unsubscribe(topic string) error {
 
 func generateToken(cfg *config.Config) (string, error) {
 	claims := jwt.MapClaims{
-		"domain": cfg.BACKEND_DOMAIN,
+		"domain": cfg.PU_DP_DOMAIN,
 		"type":   "Backend",
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	signedToken, err := token.SignedString([]byte(cfg.BACKEND_SECRET_KEY))
+	signedToken, err := token.SignedString([]byte(cfg.PU_DP_SECRET_KEY))
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %v", err)
 	}
@@ -292,7 +293,7 @@ func (c *MQTTClient) GetActiveTopics(ctx context.Context) ([]string, error) {
 	topics := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		if node.DataPipeYML != nil {
-			topic := fmt.Sprintf("%s/%s", c.cfg.BACKEND_DOMAIN, node.UUID)
+			topic := fmt.Sprintf("%s/%s", c.cfg.PU_DP_DOMAIN, node.UUID)
 			topics = append(topics, topic)
 		}
 	}

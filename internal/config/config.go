@@ -6,18 +6,18 @@ import (
 )
 
 type Config struct {
-	BACKEND_DOMAIN            string `env:"BACKEND_DOMAIN" envDefault:""`
-	BACKEND_SECRET_KEY        string `env:"BACKEND_SECRET_KEY" envDefault:""`
-	SQLALCHEMY_DATABASE_URL   string `env:"SQLALCHEMY_DATABASE_URL" envDefault:""`
-	CLICKHOUSE_DATABASE_URL   string `env:"CLICKHOUSE_DATABASE_URL" envDefault:""`
-	REDIS_URL                 string `env:"REDIS_URL" envDefault:"redis://redis:6379/0"`
-	MQTT_HOST                 string `env:"MQTT_HOST" envDefault:""`
-	MQTT_PORT                 int    `env:"MQTT_PORT" envDefault:"1883"`
-	MQTT_KEEPALIVE            int    `env:"MQTT_KEEPALIVE" envDefault:"60"`
-	CONFIG_SYNC_INTERVAL      int    `env:"CONFIG_SYNC_INTERVAL" envDefault:"60"`      // Configuration sync interval in seconds
-	NRECORDS_CLEANUP_INTERVAL int    `env:"NRECORDS_CLEANUP_INTERVAL" envDefault:"60"` // Interval in seconds
-	BUFFER_FLUSH_INTERVAL     int    `env:"BUFFER_FLUSH_INTERVAL" envDefault:"5"`      // Buffer flush interval in seconds
-	BUFFER_MAX_SIZE           int    `env:"BUFFER_MAX_SIZE" envDefault:"1000"`         // Maximum number of entries in buffer
+	PU_DP_DOMAIN                    string `env:"PU_DP_DOMAIN" envDefault:""`
+	PU_DP_SECRET_KEY                string `env:"PU_DP_SECRET_KEY" envDefault:""`
+	PU_DP_SQLALCHEMY_DATABASE_URL   string `env:"PU_DP_SQLALCHEMY_DATABASE_URL" envDefault:""`
+	PU_DP_CLICKHOUSE_DATABASE_URL   string `env:"PU_DP_CLICKHOUSE_DATABASE_URL" envDefault:""`
+	PU_DP_REDIS_URL                 string `env:"PU_DP_REDIS_URL" envDefault:"redis://redis:6379/0"`
+	PU_DP_MQTT_HOST                 string `env:"PU_DP_MQTT_HOST" envDefault:""`
+	PU_DP_MQTT_PORT                 int    `env:"PU_DP_MQTT_PORT" envDefault:"1883"`
+	PU_DP_MQTT_KEEPALIVE            int    `env:"PU_DP_MQTT_KEEPALIVE" envDefault:"60"`
+	PU_DP_CONFIG_SYNC_INTERVAL      int    `env:"PU_DP_CONFIG_SYNC_INTERVAL" envDefault:"60"`      // Configuration sync interval in seconds
+	PU_DP_NRECORDS_CLEANUP_INTERVAL int    `env:"PU_DP_NRECORDS_CLEANUP_INTERVAL" envDefault:"60"` // Interval in seconds
+	PU_DP_BUFFER_FLUSH_INTERVAL     int    `env:"PU_DP_BUFFER_FLUSH_INTERVAL" envDefault:"5"`      // Buffer flush interval in seconds
+	PU_DP_BUFFER_MAX_SIZE           int    `env:"PU_DP_BUFFER_MAX_SIZE" envDefault:"1000"`         // Maximum number of entries in buffer
 }
 
 func Load() (*Config, error) {

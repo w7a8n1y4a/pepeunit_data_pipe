@@ -43,8 +43,8 @@ func NewProcessor(clickhouseDB *database.ClickHouseDB, postgresDB *database.Post
 	bufferFactory := processing_policy.NewBufferFactory(
 		postgresDB,
 		clickhouseDB,
-		time.Duration(cfg.BUFFER_FLUSH_INTERVAL)*time.Second,
-		cfg.BUFFER_MAX_SIZE,
+		time.Duration(cfg.PU_DP_BUFFER_FLUSH_INTERVAL)*time.Second,
+		cfg.PU_DP_BUFFER_MAX_SIZE,
 	)
 	policy := processing_policy.NewProcessingPolicy(bufferFactory)
 	cleanup := cleanup.NewNRecordsCleanupService(clickhouseDB, cfg)
@@ -156,7 +156,7 @@ func (p *Processor) ProcessMessage(ctx context.Context, topic string, payload []
 
 // extractNodeUUID extracts the node UUID from a topic
 func extractNodeUUID(topic string) string {
-	// Topic format: backend_domain/node_uuid
+	// Topic format: pu_dp_domain/node_uuid
 	parts := strings.Split(topic, "/")
 	if len(parts) != 3 {
 		return ""

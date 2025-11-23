@@ -28,7 +28,7 @@ func NewNRecordsCleanupService(clickhouseDB *database.ClickHouseDB, cfg *config.
 // Start begins the periodic cleanup process
 func (s *NRecordsCleanupService) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(time.Duration(s.cfg.NRECORDS_CLEANUP_INTERVAL) * time.Second)
+		ticker := time.NewTicker(time.Duration(s.cfg.PU_DP_NRECORDS_CLEANUP_INTERVAL) * time.Second)
 		defer ticker.Stop()
 
 		for {
