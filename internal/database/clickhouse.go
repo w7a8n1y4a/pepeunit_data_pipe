@@ -68,7 +68,6 @@ func (db *ClickHouseDB) Close() error {
 
 // NLastEntry represents a record for the n_last_entry table
 type NLastEntry struct {
-	UUID           uuid.UUID
 	UnitNodeUUID   uuid.UUID
 	State          string
 	StateType      string // "Number" or "Text"
@@ -86,7 +85,6 @@ func (db *ClickHouseDB) BulkCreateNLastEntries(ctx context.Context, entries []NL
 
 	for _, entry := range entries {
 		err := batch.Append(
-			entry.UUID,
 			entry.UnitNodeUUID,
 			entry.State,
 			entry.StateType,
@@ -108,7 +106,6 @@ func (db *ClickHouseDB) BulkCreateNLastEntries(ctx context.Context, entries []NL
 
 // WindowEntry represents a record for the window_entry table
 type WindowEntry struct {
-	UUID               uuid.UUID
 	UnitNodeUUID       uuid.UUID
 	State              string
 	StateType          string // "Number" or "Text"
@@ -126,7 +123,6 @@ func (db *ClickHouseDB) BulkCreateWindowEntries(ctx context.Context, entries []W
 
 	for _, entry := range entries {
 		err := batch.Append(
-			entry.UUID,
 			entry.UnitNodeUUID,
 			entry.State,
 			entry.StateType,
@@ -148,7 +144,6 @@ func (db *ClickHouseDB) BulkCreateWindowEntries(ctx context.Context, entries []W
 
 // AggregationEntry represents a record for the aggregation_entry table
 type AggregationEntry struct {
-	UUID                uuid.UUID
 	UnitNodeUUID        uuid.UUID
 	State               float64
 	AggregationType     string // "Avg", "Min", "Max", "Sum"
@@ -167,7 +162,6 @@ func (db *ClickHouseDB) BulkCreateAggregationEntries(ctx context.Context, entrie
 
 	for _, entry := range entries {
 		err := batch.Append(
-			entry.UUID,
 			entry.UnitNodeUUID,
 			entry.State,
 			entry.AggregationType,
@@ -192,11 +186,12 @@ func (db *ClickHouseDB) BulkCreateAggregationEntries(ctx context.Context, entrie
 func (db *ClickHouseDB) CleanupNLastEntries(ctx context.Context) error {
 	query := `
 		ALTER TABLE n_last_entry
-		DELETE WHERE uuid IN (
-			SELECT uuid
+		DELETE WHERE (unit_node_uuid, create_datetime) IN (
+			SELECT unit_node_uuid, create_datetime
 			FROM (
 				SELECT
-					uuid,
+					unit_node_uuid,
+					create_datetime,
 					ROW_NUMBER() OVER (
 						PARTITION BY unit_node_uuid
 						ORDER BY create_datetime DESC

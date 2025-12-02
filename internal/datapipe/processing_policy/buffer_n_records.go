@@ -162,8 +162,7 @@ func (b *NRecordsBuffer) Flush(ctx context.Context) error {
 	for nodeUUID, nodeEntries := range updatesCopy {
 		for _, entry := range nodeEntries {
 			entries = append(entries, database.NLastEntry{
-				UUID:           uuid.New(), // Generate new UUID for each entry
-				UnitNodeUUID:   nodeUUID,   // Use the node UUID
+				UnitNodeUUID:   nodeUUID, // Use the node UUID
 				State:          entry.State,
 				StateType:      string(entry.TypeInputValue), // Use TypeInputValue from config
 				CreateDateTime: entry.UpdateTime,

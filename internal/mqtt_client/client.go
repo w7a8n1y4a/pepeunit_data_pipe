@@ -101,14 +101,10 @@ func (c *MQTTClient) Connect() error {
 
 				if wasConnected {
 					log.Println("Reconnecting...")
-					if err := c.subscribe(); err != nil {
-						log.Printf("Failed to resubscribe: %v", err)
-					}
+					go c.subscribeWithRetry(10*time.Second, true)
 				} else {
 					// Initial connection, subscribe to the topic
-					if err := c.subscribe(); err != nil {
-						log.Printf("Failed to subscribe: %v", err)
-					}
+					go c.subscribeWithRetry(10*time.Second, false)
 				}
 				log.Printf("Success Connected to MQTT broker at %s:%d", c.cfg.PU_DP_MQTT_HOST, c.cfg.PU_DP_MQTT_PORT)
 			},
@@ -168,9 +164,52 @@ func (c *MQTTClient) Connect() error {
 	return connectErr
 }
 
+// subscribeWithRetry tries to subscribe and, on failure, keeps retrying
+// every given interval until it succeeds or the client context is cancelled.
+// If isReconnect is true, logs will mention resubscribe instead of subscribe.
+func (c *MQTTClient) subscribeWithRetry(interval time.Duration, isReconnect bool) {
+	action := "subscribe"
+	failLogPrefix := "Failed to subscribe"
+	if isReconnect {
+		action = "resubscribe"
+		failLogPrefix = "Failed to resubscribe"
+	}
+
+	for {
+		// Stop retrying if context is done
+		select {
+		case <-c.ctx.Done():
+			log.Printf("Stop %s attempts due to context cancellation", action)
+			return
+		default:
+		}
+
+		// Stop retrying if connection is no longer marked as active;
+		// a new OnConnectionUp will start a fresh retry loop.
+		c.connMu.RLock()
+		connected := c.connected
+		c.connMu.RUnlock()
+		if !connected {
+			return
+		}
+
+		if err := c.subscribe(); err != nil {
+			log.Printf("%s (will retry in %s): %v", failLogPrefix, interval, err)
+		} else {
+			return
+		}
+
+		select {
+		case <-c.ctx.Done():
+			log.Printf("Stop %s attempts due to context cancellation", action)
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
 // subscribe subscribes to the single topic PU_DP_DOMAIN/+
 func (c *MQTTClient) subscribe() error {
-	fmt.Println(c.cfg.PU_DP_DOMAIN)
 	topic := fmt.Sprintf("%s/+/pepeunit", c.cfg.PU_DP_DOMAIN)
 
 	_, err := c.cm.Subscribe(c.ctx, &paho.Subscribe{

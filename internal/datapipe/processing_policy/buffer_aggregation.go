@@ -249,7 +249,6 @@ func (b *AggregationBuffer) Flush(ctx context.Context) error {
 			aggregatedValue := calculateAggregation(window, string(*policy.AggregationFunctions))
 
 			entries = append(entries, database.AggregationEntry{
-				UUID:                uuid.New(),
 				UnitNodeUUID:        nodeUUID,
 				State:               aggregatedValue,
 				AggregationType:     string(*policy.AggregationFunctions),
